@@ -1,6 +1,6 @@
 use crate::about::show_about;
 use crate::mic::MicController;
-use crate::settings::Settings;
+use crate::settings::{Settings, ShortcutConfig};
 use crate::ui::UI;
 use global_hotkey::GlobalHotKeyEvent;
 use log::trace;
@@ -18,7 +18,13 @@ const POLL_INTERVAL_MILLIS: u64 = 200;
 pub enum Message {
     HidePopup,
     FinalizeHidePopup,
-    ApplySettings,
+    /// Re-apply the in-memory settings to the live UI. `previous_shortcut`
+    /// carries the value of `mic_shortcut` before the change so the event
+    /// loop can roll back if `Shortcuts::reload` fails (only set when the
+    /// shortcut itself changed; `None` for unrelated edits).
+    ApplySettings {
+        previous_shortcut: Option<ShortcutConfig>,
+    },
     CloseSettings,
 }
 
@@ -106,17 +112,41 @@ pub fn start(
                 let mut ui = ui.write().unwrap();
                 ui.finalize_hide_popup().unwrap();
             }
-            Event::UserEvent(Message::ApplySettings) => {
+            Event::UserEvent(Message::ApplySettings { previous_shortcut }) => {
                 // trust the in-memory settings: save_action may have failed to
                 // write to disk, in which case reloading would silently lose
                 // the user's edits.
                 let new_settings = settings.read().unwrap().clone();
                 let mut ui_w = ui.write().unwrap();
-                if let Err(e) = ui_w.apply_settings(&new_settings) {
-                    log::error!("Failed to apply settings: {}", e);
-                } else {
-                    shortcut_mic.store(ui_w.mic_shortcut_id(), Ordering::Relaxed);
-                    trace!("Settings applied via Save");
+                match ui_w.apply_settings(&new_settings) {
+                    Ok(()) => {
+                        shortcut_mic.store(ui_w.mic_shortcut_id(), Ordering::Relaxed);
+                        trace!("Settings applied via Save");
+                    }
+                    Err(e) => {
+                        log::error!("Failed to apply settings: {}", e);
+                        // If a shortcut change is what blew up, restore the
+                        // prior shortcut in-memory + on-disk so a restart
+                        // recovers, then re-apply.
+                        if let Some(prev) = previous_shortcut {
+                            log::error!(
+                                "Rolling back mic_shortcut to {:?} after apply failure",
+                                prev
+                            );
+                            let mut s = settings.write().unwrap();
+                            s.mic_shortcut = prev;
+                            if let Err(save_err) = s.save() {
+                                log::error!("Failed to persist rollback: {}", save_err);
+                            }
+                            let restored = s.clone();
+                            drop(s);
+                            if let Err(retry_err) = ui_w.apply_settings(&restored) {
+                                log::error!("Failed to re-apply after rollback: {}", retry_err);
+                            } else {
+                                shortcut_mic.store(ui_w.mic_shortcut_id(), Ordering::Relaxed);
+                            }
+                        }
+                    }
                 }
                 // acknowledge the disk state regardless of whether the save
                 // succeeded, so the mtime poll doesn't trigger an unnecessary

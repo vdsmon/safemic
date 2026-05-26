@@ -16,7 +16,7 @@ run = [
 [tasks.start]
 description = "Compile, run, watch for changes (live-reload dev loop)"
 alias = ["watch", "run"]
-env = { RUST_LOG = "trace" }
+env = { RUST_LOG = "info,mic_mute=trace" }
 run = "watchexec --poll 500ms -e rs,toml -- cargo run"
 
 [tasks.check]

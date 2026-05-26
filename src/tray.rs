@@ -86,7 +86,7 @@ impl Tray {
         );
         let settings = MenuItem::new("Settings…", true, None);
         let about = MenuItem::new("About", true, None);
-        let quit = MenuItem::new("Exit", true, None);
+        let quit = MenuItem::new("Quit Mic Mute", true, None);
 
         tray_menu
             .append_items(&[

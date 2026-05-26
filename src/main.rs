@@ -38,6 +38,12 @@ fn main() {
     Builder::from_env(Env::default().default_filter_or("trace")).init();
     info!("Starting app");
 
+    // Remove the pre-rename `com.brettinternet.mic-mute` LaunchAgent so an
+    // upgrade from older versions doesn't leave a stale autoboot entry.
+    if let Err(e) = launch_at_login::migrate_legacy() {
+        log::error!("Legacy launch-agent migration failed: {}", e);
+    }
+
     let mut settings = Settings::load();
 
     // On first run (or after upgrading from a version without launch_at_login in

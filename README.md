@@ -62,7 +62,7 @@ Mic Mute is best-effort, **not** a hardware privacy switch.
 
 I have not elected to sign the app by joining the Apple Developer Program. The releases have been self-signed by me and can be installed by bypassing the typical app security on macOS. You're also welcome to build and bundle the app yourself with the simple instructions described below.
 
-[View releases](https://github.com/brettinternet/mic-mute/releases)
+[View releases](https://github.com/vdsmon/mic-mute/releases)
 
 ## Build
 

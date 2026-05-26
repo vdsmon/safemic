@@ -9,7 +9,7 @@ Prefer `mise run <task>` (defined in `mise.toml`) over raw cargo. Build/release 
 | Command | What it does |
 |---|---|
 | `mise run init` | Install dev deps (mise tools + lefthook hooks). Run once. |
-| `mise run start` | `watchexec --poll 500ms` + `cargo run` with `RUST_LOG=trace`. Live-reload dev loop. |
+| `mise run start` | `watchexec --poll 500ms` + `cargo run` with `RUST_LOG=info,mic_mute=trace`. Live-reload dev loop. |
 | `mise run build` | `cargo build --locked --release --target aarch64-apple-darwin` then `cargo bundle` → `target/aarch64-apple-darwin/release/bundle/osx/Mic Mute.app`. Opens Finder to bundle. |
 | `mise run check` (alias `lint`) | `cargo clippy --locked --release -- -D warnings` + `cargo fmt -- --check`. CI gate. |
 | `mise run fix` | clippy --fix + cargo fmt. |
@@ -72,5 +72,5 @@ For NSButton/NSMenuItem callbacks: declare a custom `NSObject` subclass via `obj
 ## Conventions
 
 - Anyhow `Result<T>` everywhere user-facing, with `.context("...")` at boundary calls. No custom error types.
-- `log::trace!` is dense and assumed on in dev (`RUST_LOG=trace` in `mise run start`). `log::error!` for recoverable errors that shouldn't crash. `.unwrap()` is used liberally for invariants that genuinely can't fail.
+- `log::trace!` is dense and assumed on in dev (`RUST_LOG=info,mic_mute=trace` in `mise run start`). `log::error!` for recoverable errors that shouldn't crash. `.unwrap()` is used liberally for invariants that genuinely can't fail.
 - `cargo clippy -- -D warnings` is enforced — fix lints, don't `#[allow]` unless there's a real reason. The single `[lints.rust] unexpected_cfgs = "allow"` in Cargo.toml is there because `objc 0.2.x` macros trip it.
