@@ -1,3 +1,4 @@
+use crate::settings::ShortcutConfig;
 use libc::c_void;
 use std::sync::{Arc, RwLock};
 
@@ -31,4 +32,20 @@ pub fn get_cursor_pos() -> Option<(f64, f64)> {
 pub fn arc_lock<T>(value: T) -> Arc<RwLock<T>> {
     let rwlock = RwLock::new(value);
     Arc::new(rwlock)
+}
+
+/// Render a `ShortcutConfig` as a single string like `⇧⌘A`.
+pub fn format_shortcut(config: &ShortcutConfig) -> String {
+    let mut parts = vec![];
+    for modifier in &config.modifiers {
+        match modifier.as_str() {
+            "shift" => parts.push("⇧"),
+            "meta" | "cmd" | "command" => parts.push("⌘"),
+            "ctrl" | "control" => parts.push("⌃"),
+            "alt" | "option" => parts.push("⌥"),
+            _ => {}
+        }
+    }
+    parts.push(config.key.as_str());
+    parts.join("")
 }

@@ -18,14 +18,30 @@ impl Default for ShortcutConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_popup_duration_ms() -> u64 {
+    1000
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub mic_shortcut: ShortcutConfig,
     #[serde(default)]
-    pub show_in_dock: bool,
-    #[serde(default)]
     pub launch_at_login: bool,
+    /// How long the on-screen popup pill stays visible after a mute/unmute event.
+    /// 0 hides the popup entirely; the menu bar icon still updates.
+    #[serde(default = "default_popup_duration_ms")]
+    pub popup_duration_ms: u64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            mic_shortcut: ShortcutConfig::default(),
+            launch_at_login: false,
+            popup_duration_ms: default_popup_duration_ms(),
+        }
+    }
 }
 
 impl Settings {
@@ -113,8 +129,8 @@ mod tests {
                 modifiers: vec!["shift".to_string()],
                 key: "M".to_string(),
             },
-            show_in_dock: false,
             launch_at_login: false,
+            popup_duration_ms: 1000,
         };
 
         let json = serde_json::to_string_pretty(&s).unwrap();
@@ -123,7 +139,28 @@ mod tests {
         let loaded: Settings =
             serde_json::from_str(&fs::read_to_string(&tmp_path).unwrap()).unwrap();
         assert_eq!(loaded.mic_shortcut.key, "M");
+        assert_eq!(loaded.popup_duration_ms, 1000);
 
         let _ = fs::remove_file(&tmp_path);
+    }
+
+    #[test]
+    fn test_default_popup_duration_ms() {
+        assert_eq!(Settings::default().popup_duration_ms, 1000);
+    }
+
+    #[test]
+    fn test_settings_json_missing_popup_duration_defaults_to_1000() {
+        let loaded: Settings = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(loaded.popup_duration_ms, 1000);
+    }
+
+    #[test]
+    fn test_settings_json_popup_duration_zero_round_trip() {
+        let loaded: Settings = serde_json::from_str(r#"{"popup_duration_ms": 0}"#).unwrap();
+        assert_eq!(loaded.popup_duration_ms, 0);
+        let json = serde_json::to_string(&loaded).unwrap();
+        let round: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(round.popup_duration_ms, 0);
     }
 }

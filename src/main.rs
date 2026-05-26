@@ -1,5 +1,4 @@
 mod about;
-mod camera;
 mod config;
 mod event_loop;
 mod icons;
@@ -8,6 +7,7 @@ mod mic;
 mod popup;
 mod popup_content;
 mod settings;
+mod settings_window;
 mod shortcuts;
 mod tray;
 mod ui;
@@ -17,7 +17,6 @@ mod utils;
 #[macro_use]
 extern crate objc;
 
-use crate::camera::CameraController;
 use crate::config::AppVars;
 use crate::event_loop::{restore_microphone_on_exit, start};
 use crate::mic::MicController;
@@ -78,15 +77,9 @@ fn main() {
         }
     });
 
-    let camera = CameraController::new().unwrap();
-    let camera_muted = camera.muted;
-    let camera = arc_lock(camera);
-    trace!("Camera controller initialized, muted={}", camera_muted);
-
-    let (ui, event_loop, event_ids) =
-        UI::new(mic_muted, camera_muted, app_vars, &settings).unwrap();
+    let (ui, event_loop, event_ids) = UI::new(mic_muted, app_vars, &settings).unwrap();
     trace!("UI initialized");
     let ui = arc_lock(ui);
     let settings = arc_lock(settings);
-    start(event_loop, event_ids, ui, controller, camera, settings);
+    start(event_loop, event_ids, ui, controller, settings);
 }

@@ -10,6 +10,30 @@ A system-wide mute for macOS microphones with a global shortcut and visual confi
 
 Mute with <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>A</kbd> or from the system tray dropdown. This is configurable from a settings file in `~/Library/Application Support/mic-mute/settings.json`.
 
+## Settings
+
+The settings file at `~/Library/Application Support/mic-mute/settings.json` accepts the following keys. Missing keys fall back to defaults, so the file may be partial.
+
+```json
+{
+  "mic_shortcut": {
+    "modifiers": ["shift", "meta"],
+    "key": "A"
+  },
+  "launch_at_login": false,
+  "popup_duration_ms": 1000
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `mic_shortcut.modifiers` | `string[]` | `["shift", "meta"]` | Any of `"shift"`, `"meta"` (Cmd), `"ctrl"`, `"alt"` (Option). |
+| `mic_shortcut.key` | `string` | `"A"` | Single key identifier: `"A"`–`"Z"`, `"0"`–`"9"`, `"F1"`–`"F20"`, `"Space"`, etc. |
+| `launch_at_login` | `bool` | `false` | Start the app automatically on login. |
+| `popup_duration_ms` | `number` | `1000` | How long the on-screen popup pill stays visible after a mute/unmute event, in milliseconds. `0` hides the popup entirely; the menu bar icon still updates. |
+
+The tray menu has **Mute**, **Settings…**, **About**, and **Quit**. The Settings window edits **Launch at Login** and the popup duration; the About window shows the version and an Open GitHub button. Launch at Login and popup duration can also be edited directly in `settings.json`.
+
 ## Features
 
 - CoreAudio API mute input devices
@@ -22,7 +46,6 @@ Mute with <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>A</kbd> or from the system tray d
   - [x] Show microphone mute status in small popup window
   - [x] Popup window shouldn't appear in screenshots or recordings and ignores mouse events
   - [x] Popup follows screens and monitors with cursor
-- [x] Report whether camera is in use (disabling cameras appears to be impossible or too difficult for the scope of this project)
 - [x] Add configurable settings (hotkey, startup)
 - [x] Open app on system startup
 
@@ -43,44 +66,38 @@ I have not elected to sign the app by joining the Apple Developer Program. The r
 
 ## Build
 
-Install dependencies with `mise`. Or you may [install Rust](https://www.rust-lang.org/tools/install). Then, [install go-task](https://taskfile.dev/installation/) or run the commands from the Taskfile separately yourself.
+Install [mise](https://mise.jdx.dev/) — it manages the Rust toolchain plus dev deps (watchexec, lefthook) and runs project tasks.
 
-Install the build dependencies, build and bundle the app.
+Install build deps + bundle the app:
 
+```sh
+mise run build
 ```
-task build
-```
 
-Once the build is complete, a finder window should open to the built bundle in the the folder `./target/aarch64-apple-darwin/release/bundle/osx`.
+A finder window opens to the bundle at `./target/aarch64-apple-darwin/release/bundle/osx`.
 
 ## Develop
 
-[![CI](https://github.com/brettinternet/mic-mute/actions/workflows/ci.yaml/badge.svg)](https://github.com/brettinternet/mic-mute/actions/workflows/ci.yaml)
-[![CI](https://github.com/brettinternet/mic-mute/actions/workflows/ci.yaml/badge.svg)](https://github.com/brettinternet/mic-mute/actions/workflows/ci.yaml)
-[![CI](https://github.com/brettinternet/mic-mute/actions/workflows/ci.yaml/badge.svg)](https://github.com/brettinternet/mic-mute/actions/workflows/ci.yaml)
-
 ### Setup
 
-[Install Rust](https://www.rust-lang.org/tools/install). Then, [install go-task](https://taskfile.dev/installation/) or run the commands from the Taskfile separately yourself.
-
-Install development dependencies.
+Install [mise](https://mise.jdx.dev/), then:
 
 ```sh
-task init
+mise run init
 ```
 
 ### Run
 
-Run and watch for changes.
+Run and watch for changes:
 
 ```sh
-task start
+mise run start
 ```
 
 ### Build
 
 ```sh
-task build
+mise run build
 ```
 
 <details>
@@ -97,7 +114,7 @@ rm sign.key
 Build a release.
 
 ```sh
-task release
+mise run release
 ```
 
 </details>

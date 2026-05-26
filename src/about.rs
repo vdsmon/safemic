@@ -1,43 +1,38 @@
-/// About window for the app.
-/// Shows version info, shortcut configuration, and a link to the GitHub repo via a native macOS NSAlert.
-use crate::settings::{Settings, ShortcutConfig};
+/// About dialog: version, repo link, project icon.
 use anyhow::Result;
 use cocoa::base::nil;
-use cocoa::foundation::NSString;
+use cocoa::foundation::{NSData, NSString};
 use objc::runtime::Object;
 use std::process::Command;
 
-fn format_shortcut(config: &ShortcutConfig) -> String {
-    let mut parts = vec![];
-    for modifier in &config.modifiers {
-        match modifier.as_str() {
-            "shift" => parts.push("⇧"),
-            "meta" | "cmd" | "command" => parts.push("⌘"),
-            "ctrl" | "control" => parts.push("⌃"),
-            "alt" | "option" => parts.push("⌥"),
-            _ => {}
-        }
-    }
-    parts.push(config.key.as_str());
-    parts.join("")
-}
+const REPO_URL: &str = "https://github.com/vdsmon/mic-mute";
+
+/// Project icon embedded at compile time. Uses the 256x256@2x bundle icon so
+/// the NSAlert renders crisp on Retina displays.
+const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icons/256x256@2x.png");
 
 /// Show the About window as an NSAlert dialog.
-/// Returns Ok(true) if settings were reset to defaults, Ok(false) if dismissed.
-pub fn show_about(settings: &mut Settings) -> Result<bool> {
-    let mic_str = format_shortcut(&settings.mic_shortcut);
-
+pub fn show_about() -> Result<()> {
     let response = unsafe {
         let alert: *mut Object = msg_send![class!(NSAlert), new];
+
+        // project icon
+        let nsdata = NSData::dataWithBytes_length_(
+            nil,
+            APP_ICON_PNG.as_ptr() as *const std::os::raw::c_void,
+            APP_ICON_PNG.len() as u64,
+        );
+        let image: *mut Object = msg_send![class!(NSImage), alloc];
+        let image: *mut Object = msg_send![image, initWithData: nsdata];
+        let _: () = msg_send![alert, setIcon: image];
+        let _: () = msg_send![image, release];
 
         let title = NSString::alloc(nil).init_str("Mic Mute");
         let _: () = msg_send![alert, setMessageText: title];
         let _: () = msg_send![title, release];
 
         let version = env!("CARGO_PKG_VERSION");
-        let info = format!(
-            "Mute shortcut: {mic_str}\n\nSettings:\n~/Library/Application Support/mic-mute/settings.json\n\nVersion: {version}\n\nSource:\ngithub.com/brettinternet/mic-mute"
-        );
+        let info = format!("Version: {version}\n\nSource: {REPO_URL}");
         let info_str = NSString::alloc(nil).init_str(&info);
         let _: () = msg_send![alert, setInformativeText: info_str];
         let _: () = msg_send![info_str, release];
@@ -45,32 +40,20 @@ pub fn show_about(settings: &mut Settings) -> Result<bool> {
         let ok_str = NSString::alloc(nil).init_str("OK");
         let _: () = msg_send![alert, addButtonWithTitle: ok_str];
         let _: () = msg_send![ok_str, release];
-        let open_str = NSString::alloc(nil).init_str("Open Settings");
-        let _: () = msg_send![alert, addButtonWithTitle: open_str];
-        let _: () = msg_send![open_str, release];
-        let reset_str = NSString::alloc(nil).init_str("Reset Settings");
-        let _: () = msg_send![alert, addButtonWithTitle: reset_str];
-        let _: () = msg_send![reset_str, release];
 
-        // 1000 = OK, 1001 = Open Settings, 1002 = Reset Settings
+        let visit_str = NSString::alloc(nil).init_str("Open GitHub");
+        let _: () = msg_send![alert, addButtonWithTitle: visit_str];
+        let _: () = msg_send![visit_str, release];
+
+        // 1000 = OK, 1001 = Open GitHub
         let response: i64 = msg_send![alert, runModal];
         let _: () = msg_send![alert, release];
         response
     };
 
-    match response {
-        1001 => {
-            if let Some(path) = dirs::config_dir().map(|d| d.join("mic-mute").join("settings.json"))
-            {
-                let _ = Command::new("open").arg("-t").arg(&path).spawn();
-            }
-            Ok(false)
-        }
-        1002 => {
-            settings.mic_shortcut = ShortcutConfig::default();
-            settings.save()?;
-            Ok(true)
-        }
-        _ => Ok(false),
+    if response == 1001 {
+        let _ = Command::new("open").arg(REPO_URL).spawn();
     }
+
+    Ok(())
 }

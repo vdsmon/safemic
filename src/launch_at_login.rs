@@ -70,20 +70,6 @@ pub fn set(enabled: bool) -> Result<()> {
     }
 }
 
-/// Toggle the app's dock icon visibility at runtime.
-///
-/// `true`  → NSApplicationActivationPolicyRegular (shows in Dock + Cmd-Tab)
-/// `false` → NSApplicationActivationPolicyAccessory (no Dock icon, default)
-pub fn set_dock_visible(visible: bool) {
-    // NSApplicationActivationPolicyRegular = 0
-    // NSApplicationActivationPolicyAccessory = 1
-    let policy: i64 = if visible { 0 } else { 1 };
-    unsafe {
-        let app: cocoa::base::id = objc::msg_send![objc::class!(NSApplication), sharedApplication];
-        let _: () = objc::msg_send![app, setActivationPolicy: policy];
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

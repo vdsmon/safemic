@@ -1,5 +1,82 @@
 [tools]
 lefthook = "latest"
 rust = "latest"
-task = "latest"
 watchexec = "latest"
+
+[env]
+RUST_BACKTRACE = "1"
+
+[tasks.init]
+description = "Install dev dependencies and git hooks"
+run = [
+    "mise install -q",
+    "lefthook install",
+]
+
+[tasks.start]
+description = "Compile, run, watch for changes (live-reload dev loop)"
+alias = ["watch", "run"]
+env = { RUST_LOG = "trace" }
+run = "watchexec --poll 500ms -e rs,toml -- cargo run"
+
+[tasks.check]
+description = "Clippy + fmt check (CI gate)"
+alias = "lint"
+run = [
+    "cargo clippy --locked --release -- -D warnings",
+    "cargo fmt -- --check",
+]
+
+[tasks.fix]
+description = "Auto-fix clippy + fmt issues"
+run = [
+    "cargo clippy --locked --release --fix --allow-dirty --allow-staged -- -D warnings",
+    "cargo fmt",
+]
+
+[tasks.test]
+description = "Run unit tests"
+run = "cargo test"
+
+[tasks.clean]
+description = "Wipe target directory"
+run = "cargo clean"
+
+[tasks."build:deps"]
+description = "Install cargo-bundle if missing"
+hide = true
+run = "cargo install cargo-bundle"
+outputs = ["~/.cargo/bin/cargo-bundle"]
+
+[tasks.build]
+description = "Build + bundle release .app for aarch64-apple-darwin"
+depends = ["build:deps"]
+run = [
+    "cargo build --locked --release --target aarch64-apple-darwin",
+    "cargo bundle --release --target aarch64-apple-darwin",
+    "open ./target/aarch64-apple-darwin/release/bundle/osx",
+]
+
+[tasks."release:deps"]
+description = "Install rcodesign + toml-cli if missing"
+hide = true
+run = [
+    "cargo install apple-codesign",
+    "cargo install toml-cli",
+]
+outputs = ["~/.cargo/bin/rcodesign", "~/.cargo/bin/toml"]
+
+[tasks.release]
+description = "Build, sign, and package signed DMG"
+depends = ["release:deps"]
+env = { RUST_LOG = "warn" }
+run = '''
+cargo clean
+cargo build --locked --release --target aarch64-apple-darwin
+cargo bundle --release --target aarch64-apple-darwin
+NAME=$(toml get Cargo.toml package.name --raw)
+VERSION=$(toml get Cargo.toml package.version --raw)
+TITLE="${NAME}-${VERSION}-aarch64-apple-darwin"
+rcodesign sign --pem-source sign.crt "./target/aarch64-apple-darwin/release/bundle/osx/Mic Mute.app"
+hdiutil create -volname "${TITLE}" -srcfolder ./target/aarch64-apple-darwin/release/bundle/osx -ov -format UDZO "${TITLE}.dmg"
+'''
