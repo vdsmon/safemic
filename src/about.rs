@@ -9,8 +9,8 @@ use std::os::raw::c_void;
 use std::process::Command;
 use std::sync::OnceLock;
 
-const REPO_URL: &str = "https://github.com/vdsmon/mic-mute";
-const REPO_DISPLAY: &str = "github.com/vdsmon/mic-mute";
+const REPO_URL: &str = "https://github.com/vdsmon/safemic";
+const REPO_DISPLAY: &str = "github.com/vdsmon/safemic";
 const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icons/256x256@2x.png");
 
 const WIN_W: f64 = 380.0;
@@ -88,7 +88,7 @@ unsafe fn run_about_modal() -> i64 {
     let wm_y = icon_y + ICON / 2.0 - 13.0;
     let tw = WIN_W - wm_x - MARGIN;
     let wm = make_label(
-        "Mic Mute",
+        "SafeMic",
         make_serif_font(28.0, FW_SEMIBOLD),
         label_color(),
         -0.5,

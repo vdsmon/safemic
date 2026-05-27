@@ -1,12 +1,12 @@
 [package]
-name = "mic-mute"
-description = "System-wide mic mute for macOS"
+name = "safemic"
+description = "System-wide microphone mute for macOS"
 version = "0.5.1"
 edition = "2021"
 authors = ["Victor de Simone Oliveira <victorsmoliveira@gmail.com>"]
 license = "MIT"
 
-default-run = "mic-mute"
+default-run = "safemic"
 
 [dependencies]
 log = "0.4"
@@ -40,8 +40,8 @@ objc2-core-audio-types = { version = "0.3", features = ["CoreAudioBaseTypes"] }
 unexpected_cfgs = "allow"
 
 [package.metadata.bundle]
-name = "Mic Mute"
-identifier = "com.vdsmon.mic-mute"
+name = "SafeMic"
+identifier = "com.vdsmon.safemic"
 icon = [
   "assets/icons/16x16.png",
   "assets/icons/16x16@2x.png",
@@ -56,10 +56,10 @@ icon = [
 ]
 copyright = "Copyright (c) Victor de Simone Oliveira 2026. MIT License."
 category = "public.app-category.utilities"
-short_description = "System-wide mic mute for macOS"
+short_description = "System-wide microphone mute for macOS"
 long_description = """
 A system-wide mute for macOS microphones with a global shortcut and visual confirmation of mute status. Inspired by VCM for Windows.
 """
 # osx_frameworks = ["Cocoa", "CoreAudio", "AppKit", "Foundation"]
-osx_url_schemes = ["com.vdsmon.mic-mute"]
+osx_url_schemes = ["com.vdsmon.safemic"]
 osx_minimum_system_version = "10"

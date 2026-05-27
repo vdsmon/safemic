@@ -16,7 +16,7 @@ run = [
 [tasks.start]
 description = "Compile, run, watch for changes (live-reload dev loop)"
 alias = ["watch", "run"]
-env = { RUST_LOG = "info,mic_mute=trace" }
+env = { RUST_LOG = "info,safemic=trace" }
 run = "watchexec --poll 500ms -e rs,toml -- cargo run"
 
 [tasks.check]
@@ -77,6 +77,6 @@ cargo bundle --release --target aarch64-apple-darwin
 NAME=$(toml get Cargo.toml package.name --raw)
 VERSION=$(toml get Cargo.toml package.version --raw)
 TITLE="${NAME}-${VERSION}-aarch64-apple-darwin"
-rcodesign sign --pem-source sign.crt "./target/aarch64-apple-darwin/release/bundle/osx/Mic Mute.app"
+rcodesign sign --pem-source sign.crt "./target/aarch64-apple-darwin/release/bundle/osx/SafeMic.app"
 hdiutil create -volname "${TITLE}" -srcfolder ./target/aarch64-apple-darwin/release/bundle/osx -ov -format UDZO "${TITLE}.dmg"
 '''

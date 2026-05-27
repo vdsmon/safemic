@@ -178,7 +178,7 @@ impl Popup {
     }
 
     fn get_size() -> WindowSize {
-        // sized to fit the longest possible label ("Mic off" / "Mic on") plus
+        // sized to fit the longest possible label ("Microphone off" / "Microphone on") plus
         // icon + padding so the pill hugs its content
         LogicalSize::new(crate::popup_content::max_pill_width(), 40.0)
     }

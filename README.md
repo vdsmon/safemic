@@ -2,17 +2,17 @@
   <img width="128" src="./assets/icons/128x128@2x.png" style="padding:0.5rem;">
 </p>
 
-<h1 align="center">Mic Mute for macOS</h1>
+<h1 align="center">SafeMic for macOS</h1>
 
-A system-wide mute for macOS microphones with a global shortcut and visual confirmation of mute status. Inspired by [VCM](https://learn.microsoft.com/en-us/windows/powertoys/video-conference-mute) for Windows.
+SafeMic is a system-wide microphone mute for macOS with a configurable global shortcut and a visual confirmation popup.
 
-![popup window screenshot indicating the microphone is off](./screenshot.png)
+![popup window screenshot indicating the microphone is off](./docs/screenshot.png)
 
-Mute with <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>A</kbd> or from the system tray dropdown. This is configurable from a settings file in `~/Library/Application Support/mic-mute/settings.json`.
+Mute with <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>A</kbd> or from the system tray dropdown. This is configurable from a settings file in `~/Library/Application Support/safemic/settings.json`.
 
 ## Settings
 
-The settings file at `~/Library/Application Support/mic-mute/settings.json` accepts the following keys. Missing keys fall back to defaults, so the file may be partial.
+The settings file at `~/Library/Application Support/safemic/settings.json` accepts the following keys. Missing keys fall back to defaults, so the file may be partial.
 
 ```json
 {
@@ -38,7 +38,7 @@ The tray menu has **Mute**, **Settings…**, **About**, and **Quit**. The Settin
 
 - CoreAudio API mute input devices
   - [x] Mute input devices
-    - Note: If native CoreAudio mute is unavailable, Mic Mute falls back to input volume controls, including virtual main volume. Devices exposing neither are skipped.
+    - Note: If native CoreAudio mute is unavailable, SafeMic falls back to input volume controls, including virtual main volume. Devices exposing neither are skipped.
   - [x] Provide global hotkey muting
   - [x] Poll new devices to mute while microphones should be off
 - Visual confirmation of mute status
@@ -51,7 +51,7 @@ The tray menu has **Mute**, **Settings…**, **About**, and **Quit**. The Settin
 
 ## Limitations
 
-Mic Mute is best-effort, **not** a hardware privacy switch.
+SafeMic is best-effort, **not** a hardware privacy switch.
 
 - Mutes CoreAudio-controllable devices only.
 - Skips devices without mute/volume controls, such as iPhone Continuity Microphone.
@@ -62,7 +62,7 @@ Mic Mute is best-effort, **not** a hardware privacy switch.
 
 I have not elected to sign the app by joining the Apple Developer Program. The releases have been self-signed by me and can be installed by bypassing the typical app security on macOS. You're also welcome to build and bundle the app yourself with the simple instructions described below.
 
-[View releases](https://github.com/vdsmon/mic-mute/releases)
+[View releases](https://github.com/vdsmon/safemic/releases)
 
 ## Build
 
@@ -106,7 +106,7 @@ Create a certificate to self-sign.
 
 ```sh
 openssl req -x509 -newkey rsa:2048 -keyout sign.key -out sign.crt \
-    -days 3650 -nodes -subj "/CN=mic-mute"
+    -days 3650 -nodes -subj "/CN=safemic"
 cat sign.key >> sign.crt
 rm sign.key
 ```
@@ -118,3 +118,7 @@ mise run release
 ```
 
 </details>
+
+## Acknowledgements
+
+SafeMic is a rebrand and continuation of [mic-mute](https://github.com/brettinternet/mic-mute) by Brett Gardiner, released under the MIT License. The original copyright is preserved in `LICENSE`.

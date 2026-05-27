@@ -1916,32 +1916,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mic-mute"
-version = "0.5.1"
-dependencies = [
- "anyhow",
- "async-std",
- "cocoa",
- "core-foundation-sys",
- "coreaudio-rs",
- "dirs",
- "env_logger",
- "global-hotkey",
- "image",
- "libc",
- "log",
- "muda",
- "objc",
- "objc2-core-audio",
- "objc2-core-audio-types",
- "resvg",
- "serde",
- "serde_json",
- "tao",
- "tray-icon",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2868,6 +2842,32 @@ dependencies = [
  "unicode-ccc",
  "unicode-properties",
  "unicode-script",
+]
+
+[[package]]
+name = "safemic"
+version = "0.5.1"
+dependencies = [
+ "anyhow",
+ "async-std",
+ "cocoa",
+ "core-foundation-sys",
+ "coreaudio-rs",
+ "dirs",
+ "env_logger",
+ "global-hotkey",
+ "image",
+ "libc",
+ "log",
+ "muda",
+ "objc",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "resvg",
+ "serde",
+ "serde_json",
+ "tao",
+ "tray-icon",
 ]
 
 [[package]]

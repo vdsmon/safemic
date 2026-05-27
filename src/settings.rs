@@ -50,7 +50,7 @@ impl Settings {
     }
 
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("mic-mute").join("settings.json"))
+        dirs::config_dir().map(|d| d.join("safemic").join("settings.json"))
     }
 
     fn load_from_file() -> Option<Self> {
@@ -119,7 +119,7 @@ mod tests {
         use std::fs;
 
         // Use a temp path for testing
-        let tmp_dir = std::env::temp_dir().join("mic-mute-test-settings");
+        let tmp_dir = std::env::temp_dir().join("safemic-test-settings");
         let tmp_path = tmp_dir.join("settings.json");
         let _ = fs::remove_file(&tmp_path);
         let _ = fs::create_dir_all(&tmp_dir);

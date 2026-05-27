@@ -7,8 +7,8 @@ use objc::runtime::Object;
 use tao::dpi::LogicalSize;
 use tao::window::Theme;
 
-const MUTED_DESCRIPTION: &str = "Mic off";
-const UNMUTED_DESCRIPTION: &str = "Mic on";
+const MUTED_DESCRIPTION: &str = "Microphone off";
+const UNMUTED_DESCRIPTION: &str = "Microphone on";
 
 const ICON_WIDTH: f64 = 18.0;
 const STACK_SPACING: f64 = 6.0;
@@ -205,11 +205,11 @@ mod tests {
 
     #[test]
     fn test_mic_mute_description_muted() {
-        assert_eq!(get_mic_mute_description_text(true), "Mic off");
+        assert_eq!(get_mic_mute_description_text(true), "Microphone off");
     }
 
     #[test]
     fn test_mic_mute_description_unmuted() {
-        assert_eq!(get_mic_mute_description_text(false), "Mic on");
+        assert_eq!(get_mic_mute_description_text(false), "Microphone on");
     }
 }
