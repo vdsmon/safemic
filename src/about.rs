@@ -28,13 +28,13 @@ const WORDMARK_SIZE: f64 = 36.0;
 const WORDMARK_TOP: f64 = 195.0;
 const VERSION_SIZE: f64 = 16.0;
 const VERSION_TOP: f64 = 245.0;
-const DIVIDER_TOP: f64 = 286.0;
+const DIVIDER_TOP: f64 = 305.0;
 const BODY_SIZE: f64 = 13.0;
-const BODY_TOP: f64 = 300.0;
+const BODY_TOP: f64 = 320.0;
 const BUTTON_W: f64 = 148.0;
 const BUTTON_H: f64 = 44.0;
 const BUTTON_RADIUS: f64 = 22.0;
-const BUTTON_TOP: f64 = 405.0;
+const BUTTON_TOP: f64 = 380.0;
 const TRAFFIC_LIGHT: f64 = 10.0;
 
 const FW_REGULAR: f64 = 0.0;
@@ -199,7 +199,8 @@ pub unsafe fn build_about_window() -> AboutWindow {
     let _: () = msg_send![card, addSubview: vl];
     let _: () = msg_send![vl, release];
 
-    // Divider line.
+    // Divider line. V5: keep full hairline width (matches target — divider
+    // spans nearly the card interior with side margins).
     let div_w = card_w - 2.0 * PAD;
     let div_y = from_top(DIVIDER_TOP, 1.0);
     let div: id = msg_send![class!(NSView), alloc];
@@ -214,7 +215,9 @@ pub unsafe fn build_about_window() -> AboutWindow {
     // Body copy: two-line description, centered.
     let body_text =
         "A simple menu bar app to mute your microphone\ninstantly and keep your conversations private.";
-    let body_h = (BODY_SIZE + 6.0) * 2.0 + 4.0;
+    // V5: tighter body box — 2 lines of 13pt with small line gap; trimmed
+    // padding so vertical centering inside the box matches target spacing.
+    let body_h = (BODY_SIZE + 4.0) * 2.0;
     let body_y = from_top(BODY_TOP, body_h);
     let body = make_label_aligned(
         body_text,
