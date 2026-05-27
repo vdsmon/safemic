@@ -1,0 +1,24 @@
+[package]
+name = "about-preview"
+description = "Standalone About-window iteration sidecar for SafeMic. Hosts only the layout code so visual tweaks rebuild in ~1s instead of ~5s for the full safemic crate."
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "about-preview"
+path = "src/main.rs"
+
+[dependencies]
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.24"
+objc = "0.2"
+
+[lints.rust]
+unexpected_cfgs = "allow"

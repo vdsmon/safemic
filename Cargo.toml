@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "tools/settings-preview", "tools/about-preview"]
+resolver = "2"
+
 [package]
 name = "safemic"
 description = "System-wide microphone mute for macOS"

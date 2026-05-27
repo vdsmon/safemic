@@ -25,15 +25,24 @@ const FW_SEMIBOLD: f64 = 0.3;
 const NS_FONT_DESCRIPTOR_SYSTEM_DESIGN_SERIF: &str = "NSCTFontUIFontDesignSerif";
 
 pub fn show_about() -> Result<()> {
-    let code = unsafe { run_about_modal() };
+    let code = unsafe {
+        let aw = build_about_window();
+        present_about_modal(aw)
+    };
     if code == 1 {
         let _ = Command::new("open").arg(REPO_URL).spawn();
     }
     Ok(())
 }
 
-unsafe fn run_about_modal() -> i64 {
-    let app: id = msg_send![class!(NSApplication), sharedApplication];
+pub struct AboutWindow {
+    pub window: id,
+    pub target_frame: NSRect,
+    pub tgt: id,
+    pub ctx_ptr: *mut c_void,
+}
+
+pub unsafe fn build_about_window() -> AboutWindow {
     let screen: id = msg_send![class!(NSScreen), mainScreen];
     let sf: NSRect = msg_send![screen, frame];
     let ox = sf.origin.x + (sf.size.width - WIN_W) / 2.0;
@@ -146,6 +155,22 @@ unsafe fn run_about_modal() -> i64 {
     let _: () = msg_send![cb, release];
     let _: () = msg_send![window, setContentView: content];
     let _: () = msg_send![content, release];
+    AboutWindow {
+        window,
+        target_frame: target,
+        tgt,
+        ctx_ptr,
+    }
+}
+
+pub unsafe fn present_about_modal(aw: AboutWindow) -> i64 {
+    let AboutWindow {
+        window,
+        target_frame: target,
+        tgt,
+        ctx_ptr,
+    } = aw;
+    let app: id = msg_send![class!(NSApplication), sharedApplication];
     let _: () = msg_send![window, makeKeyAndOrderFront: nil];
     let _: () = msg_send![app, activateIgnoringOtherApps: YES];
     // Fade in 180ms with 6pt rise.
