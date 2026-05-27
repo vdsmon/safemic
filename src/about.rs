@@ -185,10 +185,19 @@ pub unsafe fn build_about_window() -> AboutWindow {
     let _: () = msg_send![wm, release];
 
     // Version, gray, below wordmark.
+    // Source order:
+    // 1. SAFEMIC_VERSION env var (set by about-preview's build.rs from
+    //    workspace-root Cargo.toml — used in headless sidecar preview).
+    // 2. CARGO_PKG_VERSION (correct when compiled as part of the main
+    //    safemic crate).
+    // 3. "0.5.1" hardcoded fallback (shouldn't be hit; keeps the literal
+    //    visible in the design target for human review).
+    let version_str = option_env!("SAFEMIC_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    let version_display = format!("v{version_str}");
     let vh = VERSION_SIZE + 6.0;
     let vy = from_top(VERSION_TOP, vh);
     let vl = make_label_aligned(
-        "v0.5.1",
+        &version_display,
         system_font(VERSION_SIZE, FW_REGULAR),
         muted_label_color(),
         0.0,

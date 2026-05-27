@@ -14,11 +14,26 @@ Prefer `mise run <task>` (defined in `mise.toml`) over raw cargo. Build/release 
 | `mise run check` (alias `lint`) | `cargo clippy --locked --release -- -D warnings` + `cargo fmt -- --check`. CI gate. |
 | `mise run fix` | clippy --fix + cargo fmt. |
 | `mise run test` | `cargo test`. |
-| `mise run release` | Full release bundle + `rcodesign` self-sign + DMG via `hdiutil`. Requires `sign.crt` (see README for openssl invocation). |
+| `mise run release` | Full release bundle + `rcodesign` self-sign + DMG via `hdiutil`. Requires `sign.crt` (see README for openssl invocation). Dev-time mirror of CI. |
+| `git tag vX.Y.Z && git push --tags` | Canonical release action. Triggers `.github/workflows/release.yaml` on `macos-latest`, which runs `mise run release`, publishes a GitHub Release with the DMG + sha256, then opens a PR in `github.com/vdsmon/homebrew-tap` bumping `Casks/safemic.rb`. Requires repo secrets `RCODESIGN_CERT_PEM` (contents of local `sign.crt`) and `TAP_REPO_TOKEN` (fine-grained PAT for the tap repo). |
 
 Single test: `cargo test --release <test_name>` (e.g. `cargo test --release test_settings_json_round_trip`). Tests are colocated with source via `#[cfg(test)] mod tests`.
 
 - `watchexec` must run with `--poll 500ms` on macOS — atomic-rename writes (Edit tool, many IDEs) don't fire FSEvents. Already wired into `mise run start`.
+- Homebrew cask formula source-of-truth is `packaging/homebrew/safemic.rb.tmpl` in this repo. Concrete renders ship to `vdsmon/homebrew-tap`. End users install via `brew install --cask vdsmon/tap/safemic`. The cask's `postflight` strips `com.apple.quarantine` because the DMG is rcodesign self-signed, not Apple notarized.
+
+## Visual gates (loop-finder)
+
+This repo has two pre-built self-verifiable visual gates produced by the `loop-finder` skill on 2026-05-27. Use them via the project-scoped `loops` skill (`.claude/skills/loops/`, auto-discovered by Claude Code), or invoke directly:
+
+- `tools/settings-preview/iterate.sh --diff` — settings-window snapshot regression vs `snapshots/settings/*.png`. Exit 0 = match, 3 = drift.
+- `tools/about-preview/iterate.sh` — about-window target-conformance vs `~/.claude/loop-finder/60bc3b8f2621/target.png` via `magick compare -metric SSIM`. **NOTE: emits DISSIMILARITY (0=identical) despite metric name; predicate is `dissim ≤ ABOUT_DISSIM_THRESHOLD` (default 0.04).**
+
+Update settings baselines after intentional UI changes: `tools/settings-preview/iterate.sh --update`. Then `git add snapshots/settings/`.
+
+Per-class cache (history, config, summaries) lives at `~/.claude/loop-finder/<class-id>/`. Class ids: settings = `4aa9e37f9396`, about = `60bc3b8f2621`. To add a new class (popup HUD, mic.rs unit-test, etc.), invoke `/loop-finder <task description>`.
+
+Full caveat list — magick SSIM direction, non-monotone-under-extremes, sidecar version-source bug, AppKit setAlignment numbering — lives in `.claude/skills/loops/SKILL.md` and `references/`.
 
 ## Architecture
 
