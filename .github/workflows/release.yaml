@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: Verify Cargo.toml version matches tag
+        run: |
+          set -euo pipefail
+          CARGO_VERSION="$(grep -E '^version = ' Cargo.toml | head -n1 | sed -E 's/version = "(.+)"/\1/')"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Cargo.toml version ($CARGO_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "VERSION=$CARGO_VERSION" >> "$GITHUB_ENV"
+
+      - name: Stage signing cert
+        env:
+          RCODESIGN_CERT_PEM: ${{ secrets.RCODESIGN_CERT_PEM }}
+        run: |
+          umask 077
+          printf '%s' "$RCODESIGN_CERT_PEM" > sign.crt
+          chmod 0600 sign.crt
+
+      - name: Build release DMG
+        run: mise run release
+
+      - name: Compute sha256
+        run: |
+          set -euo pipefail
+          shasum -a 256 safemic-*.dmg | tee safemic-*.dmg.sha256
+          echo "DMG=$(ls safemic-*.dmg)" >> "$GITHUB_ENV"
+          echo "SHA256=$(awk '{print $1}' safemic-*.dmg.sha256)" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            safemic-*.dmg
+            safemic-*.dmg.sha256
+
+      - name: Render cask from template
+        run: |
+          set -euo pipefail
+          URL="https://github.com/vdsmon/safemic/releases/download/${GITHUB_REF_NAME}/${DMG}"
+          sed -e "s|{{version}}|${VERSION}|g" \
+              -e "s|{{sha256}}|${SHA256}|g" \
+              -e "s|{{url}}|${URL}|g" \
+              packaging/homebrew/safemic.rb.tmpl > /tmp/safemic.rb
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: vdsmon/homebrew-tap
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+          path: tap
+
+      - name: Commit cask bump to tap branch
+        run: |
+          set -euo pipefail
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p Casks
+          cp /tmp/safemic.rb Casks/safemic.rb
+          git checkout -B "bump-safemic-${VERSION}"
+          git add Casks/safemic.rb
+          git commit -m "safemic ${VERSION}"
+          git push --force origin "bump-safemic-${VERSION}"
+
+      - name: Open or reuse tap PR
+        env:
+          GH_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd tap
+          existing="$(gh pr list --head "bump-safemic-${VERSION}" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --title "safemic ${VERSION}" \
+              --body "Auto-bump for [safemic ${VERSION}](https://github.com/vdsmon/safemic/releases/tag/${GITHUB_REF_NAME})." \
+              --head "bump-safemic-${VERSION}" \
+              --base main
+          else
+            echo "Reusing PR #${existing} (force-pushed branch)."
+          fi

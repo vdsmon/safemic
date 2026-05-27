@@ -66,6 +66,10 @@ fn main() {
             libc::SIGINT,
             handle_signal as *const () as libc::sighandler_t,
         );
+        libc::signal(
+            libc::SIGUSR1,
+            event_loop::handle_sigusr1 as *const () as libc::sighandler_t,
+        );
     }
     let shutdown_controller = controller.clone();
     std::thread::spawn(move || loop {

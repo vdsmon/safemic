@@ -5,7 +5,7 @@ use crate::ui::UI;
 use global_hotkey::GlobalHotKeyEvent;
 use log::trace;
 use muda::{MenuEvent, MenuId};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tao::event::{Event, WindowEvent};
@@ -13,6 +13,14 @@ use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
 
 const POLL_INTERVAL_MILLIS: u64 = 200;
+
+// dev signal hook: SIGUSR1 opens the Settings window. Lets a script
+// drive the UI without Accessibility-grant'd osascript clicks.
+pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub extern "C" fn handle_sigusr1(_: libc::c_int) {
+    OPEN_SETTINGS_REQUESTED.store(true, Ordering::SeqCst);
+}
 
 #[derive(Debug)]
 pub enum Message {
@@ -165,6 +173,12 @@ pub fn start(
             }
             _ => {}
         };
+
+        if OPEN_SETTINGS_REQUESTED.swap(false, Ordering::SeqCst) {
+            trace!("SIGUSR1 received, opening Settings window");
+            let s = settings.read().unwrap();
+            ui.read().unwrap().open_settings_window(&s);
+        }
 
         if let Ok(event) = MenuEvent::receiver().try_recv() {
             trace!("Tray menu event: {:?}", event);

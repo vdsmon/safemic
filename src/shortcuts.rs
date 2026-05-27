@@ -82,9 +82,9 @@ impl std::fmt::Display for ShortcutConflict {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ShortcutConflict::ReservedByMacOS(name) => {
-                write!(f, "Reserved by macOS: {}", name)
+                write!(f, "\u{26A0} Used by macOS: {}", name)
             }
-            ShortcutConflict::InvalidKey(key) => write!(f, "Invalid key: {}", key),
+            ShortcutConflict::InvalidKey(key) => write!(f, "\u{26A0} Invalid key: {}", key),
         }
     }
 }

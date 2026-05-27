@@ -38,6 +38,10 @@ run = [
 description = "Run unit tests"
 run = "cargo test"
 
+[tasks."ui:preview"]
+description = "Build + launch the Settings-window sidecar and capture /tmp/settings.png. Fast iteration loop (~1-2s/cycle)."
+run = "tools/settings-preview/iterate.sh"
+
 [tasks.clean]
 description = "Wipe target directory"
 run = "cargo clean"

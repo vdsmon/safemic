@@ -24,23 +24,16 @@ use tao::platform::macos::WindowExtMacOS;
 use tao::window::{Window, WindowBuilder, WindowId};
 
 // AppKit constants (raw ObjC enums, not exposed by cocoa 0.24 helpers).
-const NS_VISUAL_EFFECT_MATERIAL_HUD_WINDOW: i64 = 12;
-const NS_VISUAL_EFFECT_STATE_ACTIVE: i64 = 1;
-const NS_VISUAL_EFFECT_BLENDING_MODE_BEHIND_WINDOW: i64 = 0;
-const NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW: u64 = 1 << 15;
 const NS_TEXT_ALIGNMENT_RIGHT: u64 = 1;
 const NS_FONT_WEIGHT_MEDIUM: f64 = 0.23;
-const NS_FONT_WEIGHT_SEMIBOLD: f64 = 0.3;
 const NS_FONT_WEIGHT_REGULAR: f64 = 0.0;
-// NSFontDescriptorSystemDesignSerif
-const NS_FONT_DESCRIPTOR_SYSTEM_DESIGN_SERIF: &str = "NSCTFontUIFontDesignSerif";
 
-const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(480.0, 280.0);
+const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(416.0, 190.0);
 const DEBOUNCE_SECS: f64 = 0.4;
 const STATUS_HOLD_SECS_OK: f64 = 0.6;
 const STATUS_HOLD_SECS_ERR: f64 = 1.5;
 const WARNING_HOLD_SECS: f64 = 3.0;
-const RECORDING_PLACEHOLDER: &str = "press a combo\u{2026}";
+const RECORDING_PLACEHOLDER: &str = "Recording\u{2026}";
 
 /// ivar payload for MMSettingsActions (leaked, app-lifetime valid).
 struct ActionContext {
@@ -48,7 +41,6 @@ struct ActionContext {
     settings: Arc<RwLock<Settings>>,
     launch_at_login_btn: id,
     popup_ms_field: id,
-    status_dot: id,
     status_label: id,
     shortcut_chip: id,
     shortcut_label: id,
@@ -82,7 +74,6 @@ pub struct SettingsWindow {
     /// Visible flag, polled by the event-loop mtime path to skip live-reload
     /// while the user is editing.
     is_open: AtomicBool,
-    status_dot: id,
     status_label: id,
 }
 
@@ -110,7 +101,6 @@ impl SettingsWindow {
             escape_btn: b.escape_btn,
             action_target: None,
             is_open: AtomicBool::new(false),
-            status_dot: b.status_dot,
             status_label: b.status_label,
         })
     }
@@ -129,7 +119,6 @@ impl SettingsWindow {
             settings,
             launch_at_login_btn: self.launch_at_login_btn,
             popup_ms_field: self.popup_ms_field,
-            status_dot: self.status_dot,
             status_label: self.status_label,
             shortcut_chip: self.shortcut_chip,
             shortcut_label: self.shortcut_label,
@@ -196,7 +185,10 @@ impl SettingsWindow {
             // that would also cancel any in-flight IME composition.
             let editor: id = msg_send![self.popup_ms_field, currentEditor];
             if editor == nil {
-                set_string(self.popup_ms_field, &settings.popup_duration_ms.to_string());
+                set_string(
+                    self.popup_ms_field,
+                    &format_seconds(settings.popup_duration_ms),
+                );
             }
             set_string(
                 self.shortcut_label,
@@ -204,6 +196,77 @@ impl SettingsWindow {
             );
             resize_chip_to_fit(self.shortcut_chip, self.shortcut_label, self.record_btn);
         }
+    }
+
+    /// Visual QA hook for the settings-preview sidecar. Drives the window
+    /// into a named non-default state so a single screencapture captures the
+    /// recording / warning / status pulse appearance without a human click.
+    /// No-op for unknown labels and when called before `bind_actions`.
+    #[allow(dead_code)]
+    pub fn preview_state(&self, state: &str) {
+        let Some(target) = self.action_target else {
+            return;
+        };
+        unsafe {
+            let this: &Object = &*target;
+            let ctx = ctx_from(this);
+            match state {
+                "default" => {}
+                "recording" => {
+                    let _: () = msg_send![target,
+                        performSelector: sel!(recordShortcutAction:) withObject: nil];
+                }
+                "warning" => show_warning(this, ctx, "\u{26A0} Already in use"),
+                "status_ok" => show_status(this, ctx, true),
+                "status_err" => show_status(this, ctx, false),
+                _ => {}
+            }
+        }
+    }
+
+    /// In-process snapshot of the entire window (titlebar + content) to a PNG
+    /// at `path`. Renders via `bitmapImageRepForCachingDisplayInRect:` +
+    /// `cacheDisplayInRect:` on the window's root theme frame view, so it
+    /// does NOT need Screen Recording permission and does NOT involve the
+    /// window server compositor. Captures focus rings, layer-backed views,
+    /// title bar, and the chip's CALayer fill correctly.
+    #[allow(dead_code)]
+    pub fn snapshot_to_png(&self, path: &str) -> Result<()> {
+        unsafe {
+            let ns_window = self.window.ns_window() as id;
+            let content_view: id = msg_send![ns_window, contentView];
+            if content_view == nil {
+                return Err(anyhow::anyhow!("no content view"));
+            }
+            // The contentView's superview is the window's themeFrame — root
+            // of the window's view hierarchy, includes titlebar background.
+            let root_view: id = msg_send![content_view, superview];
+            let target = if root_view == nil {
+                content_view
+            } else {
+                root_view
+            };
+            let bounds: NSRect = msg_send![target, bounds];
+            let rep: id = msg_send![target, bitmapImageRepForCachingDisplayInRect: bounds];
+            if rep == nil {
+                return Err(anyhow::anyhow!(
+                    "bitmapImageRepForCachingDisplayInRect returned nil"
+                ));
+            }
+            let _: () = msg_send![target, cacheDisplayInRect: bounds toBitmapImageRep: rep];
+            // NSBitmapImageFileTypePNG = 4
+            let png_data: id = msg_send![rep, representationUsingType: 4_u64 properties: nil as id];
+            if png_data == nil {
+                return Err(anyhow::anyhow!("representationUsingType:PNG returned nil"));
+            }
+            let ns_path = NSString::alloc(nil).init_str(path);
+            let ok: bool = msg_send![png_data, writeToFile: ns_path atomically: YES];
+            let _: () = msg_send![ns_path, release];
+            if !ok {
+                return Err(anyhow::anyhow!("writeToFile failed for {}", path));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -255,28 +318,39 @@ extern "C" fn popup_duration_commit(this: &Object, _cmd: Sel, _timer: *mut Objec
             let _: () = msg_send![prev, release];
         }
     }
-    unsafe {
+    let trimmed = unsafe {
         let raw: id = msg_send![ctx.popup_ms_field, stringValue];
         let cstr: *const i8 = msg_send![raw, UTF8String];
-        let trimmed = if cstr.is_null() {
+        if cstr.is_null() {
             String::new()
         } else {
             std::ffi::CStr::from_ptr(cstr)
                 .to_string_lossy()
                 .trim()
                 .to_string()
-        };
-        if trimmed.is_empty() {
-            // Empty / whitespace-only — revert the field to the persisted
-            // value without saving. Plain digits parsing to 0 stay valid
-            // (the help label documents "0 = never show").
+        }
+    };
+    let parsed = trimmed.parse::<f64>().ok();
+    match parsed {
+        None => {
+            // Empty / unparseable — revert to persisted value, no save.
             let current = ctx.settings.read().unwrap().popup_duration_ms;
-            set_string(ctx.popup_ms_field, &current.to_string());
-            return;
+            unsafe { set_string(ctx.popup_ms_field, &format_seconds(current)) };
+        }
+        Some(s) => {
+            let ms = (s.max(0.0) * 1000.0).round() as u64;
+            persist_and_pulse(this, ctx, None, |store| store.popup_duration_ms = ms);
         }
     }
-    let ms: i64 = unsafe { msg_send![ctx.popup_ms_field, integerValue] };
-    persist_and_pulse(this, ctx, None, |s| s.popup_duration_ms = ms.max(0) as u64);
+}
+
+/// Format a millisecond duration as a seconds string with one decimal place
+/// (e.g. `1000` → `"1.0"`, `1500` → `"1.5"`, `0` → `"0"`).
+fn format_seconds(ms: u64) -> String {
+    if ms == 0 {
+        return "0".to_string();
+    }
+    format!("{:.1}", ms as f64 / 1000.0)
 }
 
 fn persist_and_pulse(
@@ -304,24 +378,27 @@ fn persist_and_pulse(
     show_status(this, ctx, ok);
 }
 
-/// Pulse the status dot. ok → accent #F2675F, hold 600ms. err → systemRed,
-/// hold 1500ms. Fade in 80ms, out 320ms (NSAnimationContext + NSTimer-driven
-/// fade-out so the next pulse can pre-empt the prior one).
+/// Pulse the status feedback in the bottom-right gutter. ok → "✓ Saved" in
+/// muted gray, hold 600ms. err → "✗ Could not save" in red, hold 1500ms.
+/// Fade in 80ms, out 320ms (NSAnimationContext + NSTimer-driven fade-out so
+/// the next pulse can pre-empt the prior one).
 fn show_status(this: &Object, ctx: &ActionContext, ok: bool) {
     unsafe {
-        let dot_color: id = if ok {
-            msg_send![class!(NSColor),
-                colorWithSRGBRed: 0.949_f64 green: 0.404_f64 blue: 0.373_f64 alpha: 1.0_f64]
+        let (text, color): (&str, id) = if ok {
+            (
+                "\u{2713} Saved",
+                msg_send![class!(NSColor), tertiaryLabelColor],
+            )
         } else {
-            msg_send![class!(NSColor), systemRedColor]
+            (
+                "\u{2717} Could not save",
+                msg_send![class!(NSColor),
+                    colorWithSRGBRed: 0.949_f64 green: 0.404_f64 blue: 0.373_f64 alpha: 1.0_f64],
+            )
         };
-        let cg: *mut c_void = msg_send![dot_color, CGColor];
-        let layer: id = msg_send![ctx.status_dot, layer];
-        let _: () = msg_send![layer, setBackgroundColor: cg];
-        let label_str = NSString::alloc(nil).init_str(if ok { "saved" } else { "error" });
-        let _: () = msg_send![ctx.status_label, setStringValue: label_str];
-        let _: () = msg_send![label_str, release];
-        animate_alpha(ctx.status_dot, ctx.status_label, 1.0, 0.08);
+        set_string(ctx.status_label, text);
+        let _: () = msg_send![ctx.status_label, setTextColor: color];
+        animate_single_alpha(ctx.status_label, 1.0, 0.08);
 
         let hold = if ok {
             STATUS_HOLD_SECS_OK
@@ -343,18 +420,6 @@ fn show_status(this: &Object, ctx: &ActionContext, ok: bool) {
     }
 }
 
-unsafe fn animate_alpha(a: id, b: id, alpha: f64, secs: f64) {
-    let ctx_cls = class!(NSAnimationContext);
-    let _: () = msg_send![ctx_cls, beginGrouping];
-    let current: id = msg_send![ctx_cls, currentContext];
-    let _: () = msg_send![current, setDuration: secs];
-    let aa: id = msg_send![a, animator];
-    let ba: id = msg_send![b, animator];
-    let _: () = msg_send![aa, setAlphaValue: alpha];
-    let _: () = msg_send![ba, setAlphaValue: alpha];
-    let _: () = msg_send![ctx_cls, endGrouping];
-}
-
 unsafe fn animate_single_alpha(view: id, alpha: f64, secs: f64) {
     let ctx_cls = class!(NSAnimationContext);
     let _: () = msg_send![ctx_cls, beginGrouping];
@@ -368,11 +433,29 @@ unsafe fn animate_single_alpha(view: id, alpha: f64, secs: f64) {
 fn enter_recording_visual(ctx: &ActionContext) {
     unsafe {
         let layer: id = msg_send![ctx.shortcut_chip, layer];
-        let _: () = msg_send![layer, setBorderColor: accent_cg()];
-        let _: () = msg_send![layer, setBorderWidth: 1.5_f64];
+        let _: () = msg_send![layer, setBorderColor: recording_border_cg()];
+        let _: () = msg_send![layer, setBorderWidth: 2.0_f64];
         set_string(ctx.shortcut_label, RECORDING_PLACEHOLDER);
         resize_chip_to_fit_ctx(ctx);
+        // Recording helper is instructional, not a conflict — widen the frame
+        // to full content width so the message doesn't truncate.
+        set_warning_frame(ctx, true);
+        set_string(ctx.warning_label, "Press a key combination. Esc to cancel.");
+        let _: () = msg_send![ctx.warning_label, setTextColor: helper_color()];
+        animate_single_alpha(ctx.warning_label, 1.0, 0.10);
     }
+}
+
+unsafe fn set_warning_frame(ctx: &ActionContext, full_width: bool) {
+    let chip_frame: NSRect = msg_send![ctx.shortcut_chip, frame];
+    // y stays just below the chip (16pt below chip's bottom edge).
+    let y = chip_frame.origin.y - 18.0;
+    let (x, w) = if full_width {
+        (SIDE_PAD, WINDOW_SIZE.width - 2.0 * SIDE_PAD)
+    } else {
+        (CONTROL_X, WINDOW_SIZE.width - CONTROL_X - SIDE_PAD)
+    };
+    set_frame(ctx.warning_label, x, y, w, WARNING_H);
 }
 
 fn exit_recording_visual(ctx: &ActionContext) {
@@ -383,13 +466,27 @@ fn exit_recording_visual(ctx: &ActionContext) {
         let cg: *mut c_void = msg_send![c, CGColor];
         let _: () = msg_send![layer, setBorderColor: cg];
         let _: () = msg_send![layer, setBorderWidth: 1.0_f64];
+        // Fade the recording helper text out. show_warning's red copy will
+        // override this if a conflict triggered the exit.
+        animate_single_alpha(ctx.warning_label, 0.0, 0.10);
     }
+}
+
+unsafe fn helper_color() -> id {
+    msg_send![class!(NSColor), tertiaryLabelColor]
 }
 
 fn show_warning(this: &Object, ctx: &ActionContext, text: &str) {
     unsafe {
+        // Conflict messages bind to the chip — narrow frame under the control.
+        set_warning_frame(ctx, false);
         set_string(ctx.warning_label, text);
+        let _: () = msg_send![ctx.warning_label, setTextColor: warning_color()];
         animate_single_alpha(ctx.warning_label, 1.0, 0.12);
+        // Red chip border binds the warning text visually to the offending field.
+        let layer: id = msg_send![ctx.shortcut_chip, layer];
+        let _: () = msg_send![layer, setBorderColor: conflict_border_cg()];
+        let _: () = msg_send![layer, setBorderWidth: 1.5_f64];
         let timer: id = msg_send![
             class!(NSTimer),
             scheduledTimerWithTimeInterval: WARNING_HOLD_SECS
@@ -413,6 +510,19 @@ fn clear_warning(ctx: &ActionContext) {
             let _: () = msg_send![prev, release];
         }
         animate_single_alpha(ctx.warning_label, 0.0, 0.12);
+        // Restore the chip's idle border color.
+        reset_chip_border(ctx);
+    }
+}
+
+fn reset_chip_border(ctx: &ActionContext) {
+    unsafe {
+        let layer: id = msg_send![ctx.shortcut_chip, layer];
+        let border: id = msg_send![class!(NSColor),
+            colorWithSRGBRed: 0.337_f64 green: 0.337_f64 blue: 0.337_f64 alpha: 0.6_f64];
+        let cg: *mut c_void = msg_send![border, CGColor];
+        let _: () = msg_send![layer, setBorderColor: cg];
+        let _: () = msg_send![layer, setBorderWidth: 1.0_f64];
     }
 }
 
@@ -474,7 +584,7 @@ extern "C" fn status_hide(this: &Object, _cmd: Sel, _timer: *mut Object) {
             let _: () = msg_send![prev, release];
         }
     }
-    unsafe { animate_alpha(ctx.status_dot, ctx.status_label, 0.0, 0.32) };
+    unsafe { animate_single_alpha(ctx.status_label, 0.0, 0.32) };
 }
 
 extern "C" fn warning_hide(this: &Object, _cmd: Sel, _timer: *mut Object) {
@@ -486,6 +596,7 @@ extern "C" fn warning_hide(this: &Object, _cmd: Sel, _timer: *mut Object) {
         }
     }
     unsafe { animate_single_alpha(ctx.warning_label, 0.0, 0.24) };
+    reset_chip_border(ctx);
 }
 
 /// Edit-button selector. Cancels any in-flight recorder, clears any visible
@@ -542,7 +653,7 @@ fn handle_capture(this: &Object, result: shortcut_recorder::CaptureResult) {
         }
         shortcut_recorder::CaptureResult::MissingModifier => {
             refresh_chip_from_settings(ctx);
-            show_warning(this, ctx, "Shortcut needs at least one modifier");
+            show_warning(this, ctx, "\u{26A0} Needs a modifier key");
             return;
         }
     };
@@ -615,139 +726,115 @@ struct BuiltViews {
     shortcut_chip: id,
     record_btn: id,
     warning_label: id,
-    status_dot: id,
     status_label: id,
     escape_btn: id,
 }
+
+/// Form layout constants (logical points). Change a single value here to
+/// reshape the entire window — no inline magic numbers in build_content_view.
+const SIDE_PAD: f64 = 28.0;
+const TOP_PAD: f64 = 18.0;
+const ROW_H: f64 = 32.0;
+const ROW_GAP: f64 = 14.0;
+/// Wider gap between row 1 (shortcut) and row 2 (launch-at-login). Reserves
+/// room for the inline collision warning beneath the shortcut chip.
+const WARNING_ROW_GAP: f64 = 22.0;
+/// Right edge x where labels end. Labels are right-aligned at this gutter.
+const LABEL_GUTTER: f64 = 184.0;
+/// Left edge x where controls begin. Gap from LABEL_GUTTER = label/control spacing.
+const CONTROL_X: f64 = 196.0;
+/// Width shared by chip + field. Column rhythm anchor.
+const CONTROL_W: f64 = 170.0;
+const CONTROL_H: f64 = 28.0;
+const SWITCH_W: f64 = 38.0;
+const SWITCH_H: f64 = 22.0;
+const HELP_LEFT_GAP: f64 = 8.0;
+const STATUS_LABEL_W: f64 = 130.0;
+const STATUS_LABEL_H: f64 = 16.0;
+const STATUS_BOTTOM_MARGIN: f64 = 18.0;
+const WARNING_H: f64 = 16.0;
 
 unsafe fn build_content_view(window: &Window) -> BuiltViews {
     apply_window_chrome(window.ns_window() as id);
     let cv = window.ns_view() as id;
     let (w, h) = (WINDOW_SIZE.width, WINDOW_SIZE.height);
 
-    add(
-        cv,
-        place(make_visual_effect_view(0.0, 0.0, w, h), 0.0, 0.0, w, h),
-    );
-    add(
-        cv,
-        place(make_serif_wordmark("Settings"), 24.0, h - 52.0, 200.0, 28.0),
-    );
-    let divider_y = h - 76.0;
-    add(
-        cv,
-        place(
-            make_divider(24.0, divider_y, w - 48.0),
-            24.0,
-            divider_y,
-            w - 48.0,
-            1.0,
-        ),
-    );
+    let mut y = h - TOP_PAD - ROW_H;
 
-    let (rh, rg) = (28.0, 20.0);
-    let mut row_top = divider_y - rh;
-
-    // row 1: mute shortcut chip + Edit button
-    add(
-        cv,
-        place(
-            make_section_label("MUTE SHORTCUT"),
-            24.0,
-            row_top,
-            180.0,
-            rh,
-        ),
-    );
+    // row 1: Mute shortcut
+    place_form_label(cv, "Mute shortcut:", y);
+    let chip_h = ROW_H - 2.0;
+    let chip_y = vcenter_in_row(y, chip_h);
     let shortcut_label = make_chip_label();
-    let shortcut_chip = make_chip_view(0.0, row_top + 2.0, 64.0, rh - 4.0);
+    let shortcut_chip = make_chip_view(CONTROL_X, chip_y, CONTROL_W, chip_h);
     let _: () = msg_send![shortcut_chip, addSubview: shortcut_label];
     let _: () = msg_send![cv, addSubview: shortcut_chip];
-    // Edit affordance: small text button positioned left of the chip with an
-    // 8pt gap. resize_chip_to_fit re-runs whenever the chip text changes, so
-    // we re-pin record_btn there too.
-    let (bw, bh) = (44.0, rh - 4.0);
-    let record_btn = make_text_button("Edit");
-    add(cv, place(record_btn, 0.0, row_top + 2.0, bw, bh));
-    // Inline warning row: sits 4pt under the chip baseline, hidden until used.
+    let record_btn = make_invisible_button("Click to record a new shortcut");
+    add(cv, place(record_btn, CONTROL_X, chip_y, CONTROL_W, chip_h));
     let warning_label = make_warning_label();
     add(
         cv,
-        place(warning_label, 24.0, row_top - 18.0, w - 48.0, 14.0),
-    );
-    row_top -= rh + rg;
-
-    // row 2: launch at login (NSSwitch right)
-    add(
-        cv,
         place(
-            make_section_label("LAUNCH AT LOGIN"),
-            24.0,
-            row_top,
-            200.0,
-            rh,
+            warning_label,
+            CONTROL_X,
+            y - 18.0,
+            w - CONTROL_X - SIDE_PAD,
+            WARNING_H,
         ),
     );
-    let (sw, sh) = (38.0, 22.0);
+    // Row 1 → row 2 uses a wider gap than `ROW_GAP` so the inline warning
+    // (alpha-0 by default) sits cleanly between the two rows when it pulses
+    // visible, without overlapping "Launch at login" below.
+    y -= ROW_H + WARNING_ROW_GAP;
+
+    // row 2: Launch at login
+    place_form_label(cv, "Launch at login:", y);
     let launch_at_login_btn = make_switch();
+    // Right-align toggle to match chip + field right edge.
+    let toggle_x = CONTROL_X + CONTROL_W - SWITCH_W;
     add(
         cv,
         place(
             launch_at_login_btn,
-            w - 24.0 - sw,
-            row_top + (rh - sh) / 2.0,
-            sw,
-            sh,
+            toggle_x,
+            vcenter_in_row(y, SWITCH_H),
+            SWITCH_W,
+            SWITCH_H,
         ),
     );
-    row_top -= rh + rg;
+    y -= ROW_H + ROW_GAP;
 
-    // row 3: popup duration (ms) + help below
-    add(
-        cv,
-        place(
-            make_section_label("POPUP DURATION (MS)"),
-            24.0,
-            row_top,
-            220.0,
-            rh,
-        ),
-    );
-    let (fw, fh) = (96.0, 22.0);
+    // row 3: Popup duration
+    place_form_label(cv, "Popup duration:", y);
     let popup_ms_field = make_mono_text_field();
     add(
         cv,
         place(
             popup_ms_field,
-            w - 24.0 - fw,
-            row_top + (rh - fh) / 2.0,
-            fw,
-            fh,
+            CONTROL_X,
+            vcenter_in_row(y, CONTROL_H),
+            CONTROL_W,
+            CONTROL_H,
         ),
     );
+    let help_x = CONTROL_X + CONTROL_W + HELP_LEFT_GAP;
+    place_help_label(cv, "s", help_x, y);
+
+    // Status text: invisible by default, animates in on save with a ✓/✗ glyph.
+    let status_label = make_status_label();
+    let label_x = w - SIDE_PAD - STATUS_LABEL_W;
+    let label_y = STATUS_BOTTOM_MARGIN;
     add(
         cv,
         place(
-            make_help_label("0 = never show \u{B7} default 1000"),
-            24.0,
-            row_top - 20.0,
-            w - 48.0,
-            16.0,
+            status_label,
+            label_x,
+            label_y,
+            STATUS_LABEL_W,
+            STATUS_LABEL_H,
         ),
     );
 
-    // status indicator: 6pt dot + label, bottom-right (16pt margins)
-    let (ds, dx, dy) = (6.0, w - 22.0, 16.0);
-    let status_dot = make_status_dot(dx, dy, ds);
-    let _: () = msg_send![cv, addSubview: status_dot];
-    let (lw, lh) = (64.0, 14.0);
-    let status_label = make_status_label();
-    add(
-        cv,
-        place(status_label, dx - 6.0 - lw, dy + (ds - lh) / 2.0, lw, lh),
-    );
-
-    // Invisible Escape-key button: zero-size, no border.
     let escape_btn = make_escape_button();
     add(cv, place(escape_btn, -10.0, -10.0, 1.0, 1.0));
 
@@ -758,10 +845,55 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         shortcut_chip,
         record_btn,
         warning_label,
-        status_dot,
         status_label,
         escape_btn,
     }
+}
+
+/// Create + position a form label, right-aligned at LABEL_GUTTER and
+/// vertically centered in the row. sizeToFit gives the label its intrinsic
+/// width/height, which then drives the centered placement.
+unsafe fn place_form_label(cv: id, text: &str, row_top: f64) {
+    let lbl = make_form_label(text);
+    let _: () = msg_send![lbl, sizeToFit];
+    let lf: NSRect = msg_send![lbl, frame];
+    let lw = lf.size.width;
+    let lh = lf.size.height;
+    let lx = LABEL_GUTTER - lw;
+    let ly = vcenter_in_row(row_top, lh);
+    set_frame(lbl, lx, ly, lw, lh);
+    add(cv, lbl);
+}
+
+/// Place a help label (e.g. "ms") pinned to `x` with its intrinsic width, so
+/// it neither truncates nor stretches into the right margin.
+unsafe fn place_help_label(cv: id, text: &str, x: f64, row_top: f64) {
+    let lbl = make_help_label(text);
+    let _: () = msg_send![lbl, sizeToFit];
+    let lf: NSRect = msg_send![lbl, frame];
+    let lw = lf.size.width;
+    let lh = lf.size.height;
+    let ly = vcenter_in_row(row_top, lh);
+    set_frame(lbl, x, ly, lw, lh);
+    add(cv, lbl);
+}
+
+/// Vertically center a `content_h`-tall element inside a `ROW_H`-tall row
+/// starting at `row_top`. Floored to integer pixels for crisp rendering.
+fn vcenter_in_row(row_top: f64, content_h: f64) -> f64 {
+    row_top + ((ROW_H - content_h) / 2.0).floor()
+}
+
+unsafe fn make_form_label(text: &str) -> id {
+    let label = make_plain_label(
+        system_font(14.0, NS_FONT_WEIGHT_REGULAR),
+        secondary_label_color(),
+    );
+    let s = NSString::alloc(nil).init_str(text);
+    let _: () = msg_send![label, setStringValue: s];
+    let _: () = msg_send![s, release];
+    let _: () = msg_send![label, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
+    label
 }
 
 unsafe fn place(view: id, x: f64, y: f64, w: f64, h: f64) -> id {
@@ -783,60 +915,35 @@ unsafe fn make_escape_button() -> id {
 }
 
 unsafe fn apply_window_chrome(ns_window: id) {
-    // transparent titlebar so the HUD blur reaches the top edge; vibrant dark
-    // appearance matches the HUD regardless of system theme.
-    let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: YES];
-    let _: () = msg_send![ns_window, setTitleVisibility: 1i64]; // NSWindowTitleHidden
-    let current: u64 = msg_send![ns_window, styleMask];
-    let _: () =
-        msg_send![ns_window, setStyleMask: current | NS_WINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW];
-    let _: () = msg_send![ns_window, setMovableByWindowBackground: YES];
-    let appearance: id = msg_send![class!(NSAppearance), appearanceNamed: NSString::alloc(nil).init_str("NSAppearanceNameVibrantDark")];
+    // Standard macOS prefs window: visible titlebar with "Settings" title.
+    // Lock to dark appearance so the chip's CALayer colors (which don't auto-
+    // adapt) stay visually consistent regardless of system theme.
+    let title = NSString::alloc(nil).init_str("Settings");
+    let _: () = msg_send![ns_window, setTitle: title];
+    let _: () = msg_send![title, release];
+    let _: () = msg_send![ns_window, setTitleVisibility: 0i64]; // NSWindowTitleVisible
+    let _: () = msg_send![ns_window, setTitlebarAppearsTransparent: NO];
+    let name = NSString::alloc(nil).init_str("NSAppearanceNameDarkAqua");
+    let appearance: id = msg_send![class!(NSAppearance), appearanceNamed: name];
+    let _: () = msg_send![name, release];
     let _: () = msg_send![ns_window, setAppearance: appearance];
-}
 
-unsafe fn make_visual_effect_view(x: f64, y: f64, w: f64, h: f64) -> id {
-    let v: id = msg_send![class!(NSVisualEffectView), alloc];
-    let v: id = msg_send![v, init];
-    set_frame(v, x, y, w, h);
-    let _: () = msg_send![v, setMaterial: NS_VISUAL_EFFECT_MATERIAL_HUD_WINDOW];
-    let _: () = msg_send![v, setState: NS_VISUAL_EFFECT_STATE_ACTIVE];
-    let _: () = msg_send![v, setBlendingMode: NS_VISUAL_EFFECT_BLENDING_MODE_BEHIND_WINDOW];
-    let _: () = msg_send![v, setAutoresizingMask: 2u64 | 16u64]; // width + height sizable
-    v
-}
-
-unsafe fn make_serif_wordmark(text: &str) -> id {
-    make_attr_label(
-        text,
-        serif_font(22.0, NS_FONT_WEIGHT_SEMIBOLD),
-        -0.4,
-        label_color(),
-    )
-}
-
-unsafe fn make_section_label(text: &str) -> id {
-    make_attr_label(
-        text,
-        system_font(12.0, NS_FONT_WEIGHT_MEDIUM),
-        1.5,
-        secondary_label_color(),
-    )
-}
-
-unsafe fn make_attr_label(text: &str, font: id, kern: f64, color: id) -> id {
-    let label = make_bare_label();
-    let s = NSString::alloc(nil).init_str(text);
-    let attr = attributed_string_with_kern(s, kern, font, color);
-    let _: () = msg_send![label, setAttributedStringValue: attr];
-    let _: () = msg_send![s, release];
-    let _: () = msg_send![attr, release];
-    label
+    // Hide the disabled-looking minimize/zoom traffic lights (window chrome
+    // is non-resizable + non-minimizable, so showing them greyed reads as
+    // broken). Leave the red close button intact.
+    let miniaturize_btn: id = msg_send![ns_window, standardWindowButton: 1u64]; // NSWindowMiniaturizeButton
+    let zoom_btn: id = msg_send![ns_window, standardWindowButton: 2u64]; // NSWindowZoomButton
+    if miniaturize_btn != nil {
+        let _: () = msg_send![miniaturize_btn, setHidden: YES];
+    }
+    if zoom_btn != nil {
+        let _: () = msg_send![zoom_btn, setHidden: YES];
+    }
 }
 
 unsafe fn make_help_label(text: &str) -> id {
     let label = make_plain_label(
-        system_font(11.0, NS_FONT_WEIGHT_REGULAR),
+        system_font(12.0, NS_FONT_WEIGHT_REGULAR),
         tertiary_label_color(),
     );
     let s = NSString::alloc(nil).init_str(text);
@@ -854,7 +961,7 @@ unsafe fn make_plain_label(font: id, color: id) -> id {
 
 unsafe fn make_status_label() -> id {
     let label = make_plain_label(
-        system_font(10.0, NS_FONT_WEIGHT_REGULAR),
+        system_font(11.0, NS_FONT_WEIGHT_REGULAR),
         tertiary_label_color(),
     );
     let _: () = msg_send![label, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
@@ -862,28 +969,38 @@ unsafe fn make_status_label() -> id {
     label
 }
 
-unsafe fn make_status_dot(x: f64, y: f64, size: f64) -> id {
-    let v = make_layer_view(x, y, size, size);
-    let layer: id = msg_send![v, layer];
-    let _: () = msg_send![layer, setCornerRadius: size / 2.0];
-    let _: () = msg_send![v, setAlphaValue: 0.0_f64];
-    v
-}
-
 unsafe fn make_chip_label() -> id {
-    let font: id = msg_send![class!(NSFont), monospacedSystemFontOfSize: 12.0_f64 weight: NS_FONT_WEIGHT_MEDIUM];
+    // 13pt matches the popup-duration field font so both controls in the form
+    // have the same type weight.
+    let font: id = msg_send![class!(NSFont), monospacedSystemFontOfSize: 14.0_f64 weight: NS_FONT_WEIGHT_MEDIUM];
     let label = make_plain_label(font, label_color());
     let _: () = msg_send![label, setAlignment: 2u64]; // center
+                                                      // Force single-line + no wrap so intrinsicContentSize reports the full
+                                                      // string width (NSTextField defaults wrap on intrinsic measurement).
+    let cell: id = msg_send![label, cell];
+    let _: () = msg_send![cell, setUsesSingleLineMode: YES];
+    let _: () = msg_send![cell, setWraps: NO];
+    let _: () = msg_send![cell, setScrollable: YES];
     label
 }
 
 unsafe fn make_chip_view(x: f64, y: f64, w: f64, h: f64) -> id {
+    // Match the bordered look of NSTextField in dark mode so both controls in
+    // this form read as the same "input" register. Approximated:
+    //   bg     ≈ NSColor.controlBackgroundColor (dark) ≈ rgb(30,30,30)
+    //   border ≈ NSColor.separatorColor (dark)         ≈ rgb(86,86,86, alpha 0.6)
     let v = make_layer_view(x, y, w, h);
     let layer: id = msg_send![v, layer];
-    let _: () = msg_send![layer, setBackgroundColor: white_cg(0.10)];
-    let _: () = msg_send![layer, setBorderColor: white_cg(0.15)];
+    let bg: id = msg_send![class!(NSColor),
+        colorWithSRGBRed: 0.117_f64 green: 0.117_f64 blue: 0.117_f64 alpha: 1.0_f64];
+    let bg_cg: *mut c_void = msg_send![bg, CGColor];
+    let _: () = msg_send![layer, setBackgroundColor: bg_cg];
+    let border: id = msg_send![class!(NSColor),
+        colorWithSRGBRed: 0.337_f64 green: 0.337_f64 blue: 0.337_f64 alpha: 0.6_f64];
+    let border_cg: *mut c_void = msg_send![border, CGColor];
+    let _: () = msg_send![layer, setBorderColor: border_cg];
     let _: () = msg_send![layer, setBorderWidth: 1.0_f64];
-    let _: () = msg_send![layer, setCornerRadius: 6.0_f64];
+    let _: () = msg_send![layer, setCornerRadius: 8.0_f64];
     v
 }
 
@@ -895,42 +1012,48 @@ unsafe fn make_layer_view(x: f64, y: f64, w: f64, h: f64) -> id {
     v
 }
 
-unsafe fn white_cg(alpha: f64) -> *mut c_void {
-    let c: id = msg_send![class!(NSColor),
-        colorWithSRGBRed: 1.0_f64 green: 1.0_f64 blue: 1.0_f64 alpha: alpha];
-    msg_send![c, CGColor]
-}
-
 unsafe fn resize_chip_to_fit(chip: id, inner_label: id, record_btn: id) {
-    // measure the label's intrinsic content size, pad horizontally, and pin
-    // the chip's right edge to the window's right margin.
-    let _: () = msg_send![inner_label, sizeToFit];
-    let label_frame: NSRect = msg_send![inner_label, frame];
-    let text_w = label_frame.size.width.max(28.0);
+    // Measure the label's intrinsic content size, pad horizontally, and pick
+    // the chip's right edge so the chip never overflows the window margin.
+    //
+    // Default state (chip_w == CONTROL_W): right edge at CONTROL_X + CONTROL_W
+    // — flush with the field/switch column below.
+    // Recording state (chip_w > CONTROL_W): right edge at the window's right
+    // padding — row 1 has no help-rail, so this space is free.
+    //
+    // intrinsicContentSize (not sizeToFit) — sizeToFit wraps to the current
+    // frame width on multi-line cells, which underreports the natural width.
+    let intrinsic: NSSize = msg_send![inner_label, intrinsicContentSize];
+    let text_w = intrinsic.width.max(28.0);
+    let text_h = intrinsic.height;
+    let label_frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(text_w, text_h));
     let chip_frame: NSRect = msg_send![chip, frame];
-    let chip_w = text_w + 18.0;
+    let chip_w = (text_w + 18.0).max(CONTROL_W);
     let chip_h = chip_frame.size.height;
     let chip_y = chip_frame.origin.y;
-    let chip_x = WINDOW_SIZE.width - 24.0 - chip_w;
+    let target_right = if chip_w > CONTROL_W {
+        // Recording / overflow state: extend leftward into the label region.
+        // The "Mute shortcut:" label is redundant context while recording, so
+        // accepting overlap reads as the chip "taking focus" rather than a bug.
+        WINDOW_SIZE.width - SIDE_PAD
+    } else {
+        CONTROL_X + CONTROL_W
+    };
+    let chip_x = (target_right - chip_w).max(SIDE_PAD);
     set_frame(chip, chip_x, chip_y, chip_w, chip_h);
-    let label_y = (chip_h - label_frame.size.height) / 2.0;
-    set_frame(inner_label, 0.0, label_y, chip_w, label_frame.size.height);
+    // Center the label as a tightly-bounded view inside the chip. NSTextField's
+    // internal centerAlignment isn't reliable for keyboard-symbol glyphs, so we
+    // size to fit + position the label frame ourselves.
+    let label_w = label_frame.size.width;
+    let label_h = label_frame.size.height;
+    let label_x = ((chip_w - label_w) / 2.0).floor();
+    let label_y = ((chip_h - label_h) / 2.0).floor();
+    set_frame(inner_label, label_x, label_y, label_w, label_h);
 
     if record_btn != nil {
-        let btn_frame: NSRect = msg_send![record_btn, frame];
-        let bw = btn_frame.size.width;
-        let bh = btn_frame.size.height;
-        let btn_y = chip_y + (chip_h - bh) / 2.0;
-        let btn_x = chip_x - 8.0 - bw;
-        set_frame(record_btn, btn_x, btn_y, bw, bh);
+        // overlay button = chip frame (whole chip is the click affordance)
+        set_frame(record_btn, chip_x, chip_y, chip_w, chip_h);
     }
-}
-
-unsafe fn make_divider(x: f64, y: f64, w: f64) -> id {
-    let v = make_layer_view(x, y, w, 1.0);
-    let layer: id = msg_send![v, layer];
-    let _: () = msg_send![layer, setBackgroundColor: white_cg(0.15)];
-    v
 }
 
 unsafe fn make_bare_label() -> id {
@@ -948,23 +1071,23 @@ unsafe fn make_switch() -> id {
     msg_send![sw, init]
 }
 
-unsafe fn make_text_button(text: &str) -> id {
+unsafe fn make_invisible_button(tooltip: &str) -> id {
     let btn: id = msg_send![class!(NSButton), alloc];
     let btn: id = msg_send![btn, init];
-    let title = NSString::alloc(nil).init_str(text);
-    let _: () = msg_send![btn, setTitle: title];
-    let _: () = msg_send![title, release];
-    // NSBezelStyleInline (12) reads as a compact secondary control on macOS 11+.
-    let _: () = msg_send![btn, setBezelStyle: 12i64];
-    let _: () = msg_send![btn, setBordered: YES];
-    let font: id =
-        msg_send![class!(NSFont), systemFontOfSize: 11.0_f64 weight: NS_FONT_WEIGHT_MEDIUM];
-    let _: () = msg_send![btn, setFont: font];
+    let empty = NSString::alloc(nil).init_str("");
+    let _: () = msg_send![btn, setTitle: empty];
+    let _: () = msg_send![empty, release];
+    let _: () = msg_send![btn, setBordered: NO];
+    let _: () = msg_send![btn, setBezelStyle: 0i64];
+    let _: () = msg_send![btn, setTransparent: YES];
+    let tt = NSString::alloc(nil).init_str(tooltip);
+    let _: () = msg_send![btn, setToolTip: tt];
+    let _: () = msg_send![tt, release];
     btn
 }
 
 unsafe fn make_warning_label() -> id {
-    let label = make_plain_label(system_font(11.0, NS_FONT_WEIGHT_REGULAR), warning_color());
+    let label = make_plain_label(system_font(12.0, NS_FONT_WEIGHT_REGULAR), warning_color());
     let _: () = msg_send![label, setAlphaValue: 0.0_f64];
     label
 }
@@ -975,9 +1098,17 @@ unsafe fn warning_color() -> id {
         colorWithSRGBRed: 0.949_f64 green: 0.404_f64 blue: 0.373_f64 alpha: 1.0_f64]
 }
 
-unsafe fn accent_cg() -> *mut c_void {
+/// Red used for the conflict-state chip border (matches the warning text).
+unsafe fn conflict_border_cg() -> *mut c_void {
     let c: id = msg_send![class!(NSColor),
         colorWithSRGBRed: 0.949_f64 green: 0.404_f64 blue: 0.373_f64 alpha: 1.0_f64];
+    msg_send![c, CGColor]
+}
+
+/// Macos system accent color (adapts to user pref). Used for the recording
+/// focus border on the shortcut chip.
+unsafe fn recording_border_cg() -> *mut c_void {
+    let c: id = msg_send![class!(NSColor), controlAccentColor];
     msg_send![c, CGColor]
 }
 
@@ -989,7 +1120,7 @@ unsafe fn make_mono_text_field() -> id {
     let _: () = msg_send![field, setSelectable: YES];
     let _: () = msg_send![field, setDrawsBackground: YES];
     let _: () = msg_send![field, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
-    let font: id = msg_send![class!(NSFont), monospacedDigitSystemFontOfSize: 13.0_f64 weight: NS_FONT_WEIGHT_REGULAR];
+    let font: id = msg_send![class!(NSFont), monospacedDigitSystemFontOfSize: 14.0_f64 weight: NS_FONT_WEIGHT_REGULAR];
     let _: () = msg_send![field, setFont: font];
     let placeholder = NSString::alloc(nil).init_str("1000");
     let _: () = msg_send![field, setPlaceholderString: placeholder];
@@ -1006,23 +1137,6 @@ unsafe fn system_font(size: f64, weight: f64) -> id {
     msg_send![class!(NSFont), systemFontOfSize: size weight: weight]
 }
 
-unsafe fn serif_font(size: f64, weight: f64) -> id {
-    let base: id = msg_send![class!(NSFont), systemFontOfSize: size weight: weight];
-    let descriptor: id = msg_send![base, fontDescriptor];
-    let design = NSString::alloc(nil).init_str(NS_FONT_DESCRIPTOR_SYSTEM_DESIGN_SERIF);
-    let serif_desc: id = msg_send![descriptor, fontDescriptorWithDesign: design];
-    let _: () = msg_send![design, release];
-    if serif_desc == nil {
-        return base;
-    }
-    let serif: id = msg_send![class!(NSFont), fontWithDescriptor: serif_desc size: size];
-    if serif == nil {
-        base
-    } else {
-        serif
-    }
-}
-
 unsafe fn label_color() -> id {
     msg_send![class!(NSColor), labelColor]
 }
@@ -1031,22 +1145,6 @@ unsafe fn secondary_label_color() -> id {
 }
 unsafe fn tertiary_label_color() -> id {
     msg_send![class!(NSColor), tertiaryLabelColor]
-}
-
-unsafe fn attributed_string_with_kern(s: id, kern: f64, font: id, color: id) -> id {
-    let attrs: id = msg_send![class!(NSMutableDictionary), dictionary];
-    let kern_num: id = msg_send![class!(NSNumber), numberWithDouble: kern];
-    dict_set(attrs, "NSKern", kern_num);
-    dict_set(attrs, "NSFont", font);
-    dict_set(attrs, "NSColor", color);
-    let attr: id = msg_send![class!(NSAttributedString), alloc];
-    msg_send![attr, initWithString: s attributes: attrs]
-}
-
-unsafe fn dict_set(dict: id, key: &str, value: id) {
-    let k = NSString::alloc(nil).init_str(key);
-    let _: () = msg_send![dict, setObject: value forKey: k];
-    let _: () = msg_send![k, release];
 }
 
 unsafe fn animate_appear(ns_window: id) {

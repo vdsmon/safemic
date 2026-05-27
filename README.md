@@ -58,11 +58,32 @@ SafeMic is best-effort, **not** a hardware privacy switch.
 - Polling can leave brief mute gaps.
 - Drivers can lie; use hardware mute, unplug, or macOS permissions for high assurance.
 
-## Releases
+## Install
 
-I have not elected to sign the app by joining the Apple Developer Program. The releases have been self-signed by me and can be installed by bypassing the typical app security on macOS. You're also welcome to build and bundle the app yourself with the simple instructions described below.
+### Homebrew (recommended)
+
+```sh
+brew tap vdsmon/tap
+brew install --cask safemic
+```
+
+Apple Silicon (arm64) only for now. The cask strips the macOS quarantine attribute on install so the app launches without a Gatekeeper warning.
+
+To upgrade later: `brew upgrade --cask safemic`. To uninstall completely (including settings): `brew uninstall --cask --zap safemic`.
+
+### Manual install
+
+I have not elected to sign the app by joining the Apple Developer Program. The releases are self-signed and can be installed by bypassing the typical app security on macOS, or by building and bundling the app yourself with the instructions further down this README.
 
 [View releases](https://github.com/vdsmon/safemic/releases)
+
+After downloading the DMG and dragging `SafeMic.app` to `/Applications`, run:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/SafeMic.app"
+```
+
+(or use the "Open Anyway" path under System Settings → Privacy & Security).
 
 ## Build
 

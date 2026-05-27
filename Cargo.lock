@@ -3,6 +3,18 @@
 version = 4
 
 [[package]]
+name = "about-preview"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cocoa",
+ "env_logger",
+ "libc",
+ "log",
+ "objc",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2941,6 +2953,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "settings-preview"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cocoa",
+ "env_logger",
+ "libc",
+ "log",
+ "objc",
+ "tao",
 ]
 
 [[package]]
