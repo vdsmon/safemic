@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 
 const REPO_URL: &str = "https://github.com/vdsmon/safemic";
 const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icons/256x256@2x.png");
+const OCTOCAT_PNG: &[u8] = include_bytes!("../assets/icons/octocat-32.png");
 
 // Window dimensions roughly track target.png aspect (1538x1023 ≈ 3:2).
 // Y-position constants are measured from the top of the card and roughly
@@ -31,9 +32,9 @@ const VERSION_TOP: f64 = 245.0;
 const DIVIDER_TOP: f64 = 305.0;
 const BODY_SIZE: f64 = 13.0;
 const BODY_TOP: f64 = 320.0;
-const BUTTON_W: f64 = 148.0;
-const BUTTON_H: f64 = 44.0;
-const BUTTON_RADIUS: f64 = 22.0;
+const BUTTON_W: f64 = 165.0;
+const BUTTON_H: f64 = 41.0;
+const BUTTON_RADIUS: f64 = 20.5;
 const BUTTON_TOP: f64 = 380.0;
 const TRAFFIC_LIGHT: f64 = 10.0;
 
@@ -235,11 +236,22 @@ pub unsafe fn build_about_window() -> AboutWindow {
     let _: () = msg_send![card, addSubview: body];
     let _: () = msg_send![body, release];
 
-    // Pill button "View on GitHub".
+    // Pill button "View on GitHub" with octocat icon on the left.
     let btn_x = (card_w - BUTTON_W) / 2.0;
     let btn_y = from_top(BUTTON_TOP, BUTTON_H);
-    let btn_font = system_font(15.0, FW_SEMIBOLD);
-    let ob = make_pill_button("  View on GitHub", btn_font, tgt, sel!(openGitHubAction:));
+    let btn_font = system_font(16.0, FW_SEMIBOLD);
+    let ob = make_pill_button("View on GitHub", btn_font, tgt, sel!(openGitHubAction:));
+    let cat_data = NSData::dataWithBytes_length_(
+        nil,
+        OCTOCAT_PNG.as_ptr() as *const c_void,
+        OCTOCAT_PNG.len() as u64,
+    );
+    let cat_img: id = msg_send![class!(NSImage), alloc];
+    let cat_img: id = msg_send![cat_img, initWithData: cat_data];
+    let _: () = msg_send![cat_img, setSize: NSSize::new(20.0, 20.0)];
+    let _: () = msg_send![ob, setImage: cat_img];
+    let _: () = msg_send![ob, setImagePosition: 2_u64];
+    let _: () = msg_send![cat_img, release];
     set_frame(ob, btn_x, btn_y, BUTTON_W, BUTTON_H);
     let enter = NSString::alloc(nil).init_str("\r");
     let _: () = msg_send![ob, setKeyEquivalent: enter];
