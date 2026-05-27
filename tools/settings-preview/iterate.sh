@@ -21,7 +21,14 @@
 #   odiff  (brew install odiff)   — only needed for --diff / --update
 set -e
 
-ROOT="/Users/victordsm/repos/mic-mute"
+# Derive repo/worktree root from script location. Works in both main checkout
+# and git worktrees (the old hardcoded ROOT raced parallel variants through
+# main's binary).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ -d "$ROOT/.git" ] || [ -f "$ROOT/.git" ]; then
+  GIT_ROOT="$(cd "$ROOT" && git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$GIT_ROOT" ]; then ROOT="$GIT_ROOT"; fi
+fi
 BIN="$ROOT/target/aarch64-apple-darwin/debug/settings-preview"
 OUT="/tmp/safemic-snap"
 SNAPSHOT_BASE="$ROOT/snapshots/settings"
