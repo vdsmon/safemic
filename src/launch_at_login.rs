@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-const PLIST_LABEL: &str = "com.brettinternet.mic-mute";
+const PLIST_LABEL: &str = "com.vdsmon.mic-mute";
+const LEGACY_PLIST_LABEL: &str = "com.brettinternet.mic-mute";
 
 fn plist_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| {
@@ -70,18 +71,36 @@ pub fn set(enabled: bool) -> Result<()> {
     }
 }
 
-/// Toggle the app's dock icon visibility at runtime.
-///
-/// `true`  → NSApplicationActivationPolicyRegular (shows in Dock + Cmd-Tab)
-/// `false` → NSApplicationActivationPolicyAccessory (no Dock icon, default)
-pub fn set_dock_visible(visible: bool) {
-    // NSApplicationActivationPolicyRegular = 0
-    // NSApplicationActivationPolicyAccessory = 1
-    let policy: i64 = if visible { 0 } else { 1 };
-    unsafe {
-        let app: cocoa::base::id = objc::msg_send![objc::class!(NSApplication), sharedApplication];
-        let _: () = objc::msg_send![app, setActivationPolicy: policy];
+/// Idempotent cleanup of the pre-rename `com.brettinternet.mic-mute` plist.
+/// Unloads it from launchd if loaded, then removes the file. Safe to call on
+/// every launch — does nothing when the file is already gone.
+pub fn migrate_legacy() -> Result<()> {
+    let path = match dirs::home_dir() {
+        Some(h) => h
+            .join("Library")
+            .join("LaunchAgents")
+            .join(format!("{}.plist", LEGACY_PLIST_LABEL)),
+        None => return Ok(()),
+    };
+    if !path.exists() {
+        return Ok(());
     }
+    let path_str = path.to_string_lossy().to_string();
+    // Ignore the result — the agent may already be unloaded, or launchctl
+    // may be unavailable in this environment.
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", &path_str])
+        .status();
+    match std::fs::remove_file(&path) {
+        Ok(()) => log::info!("Removed legacy launch agent at {}", path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => log::error!(
+            "Failed to remove legacy launch agent {}: {}",
+            path.display(),
+            e
+        ),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

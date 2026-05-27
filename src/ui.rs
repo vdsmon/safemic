@@ -1,22 +1,24 @@
 use crate::config::AppVars;
-use crate::event_loop::{create, EventIds, EventLoopMessage};
+use crate::event_loop::{create, EventIds, EventLoopMessage, EventLoopProxyMessage};
 use crate::popup::Popup;
 use crate::settings::Settings;
+use crate::settings_window::SettingsWindow;
 use crate::shortcuts::Shortcuts;
 use crate::tray::Tray;
 use anyhow::{Context, Result};
 use log::trace;
 use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use tao::window::WindowId;
 
 /// Event loop must remain on the main thread and doesn't implement Copy
 #[allow(dead_code)]
 pub struct UI {
     tray: Tray,
     popup: Popup,
+    settings_window: SettingsWindow,
     shortcuts: Shortcuts,
     mic_muted: bool,
-    camera_muted: bool,
 }
 
 unsafe impl Send for UI {}
@@ -25,28 +27,22 @@ unsafe impl Sync for UI {}
 impl UI {
     pub fn new(
         mic_muted: bool,
-        camera_muted: bool,
         app_vars: AppVars,
         settings: &Settings,
     ) -> Result<(Self, EventLoopMessage, EventIds)> {
         let event_loop = create();
-        let popup = Popup::new(&event_loop, mic_muted).context("Failed to setup popup window")?;
+        let popup = Popup::new(&event_loop, mic_muted, settings.popup_duration_ms)
+            .context("Failed to setup popup window")?;
+        let settings_window =
+            SettingsWindow::new(&event_loop).context("Failed to setup settings window")?;
         let theme = popup.get_theme();
-        let tray = Tray::new(
-            mic_muted,
-            theme,
-            app_vars,
-            settings.launch_at_login,
-            settings.show_in_dock,
-            &settings.mic_shortcut,
-        )
-        .context("Failed to create system tray")?;
+        let tray = Tray::new(mic_muted, theme, app_vars, &settings.mic_shortcut)
+            .context("Failed to create system tray")?;
         let shortcuts = Shortcuts::new(settings).context("Failed to setup shortcuts")?;
 
         let event_ids = EventIds {
             button_toggle_mute: tray.toggle_mute_id().clone(),
-            button_launch_at_login: tray.launch_at_login_id().clone(),
-            button_show_in_dock: tray.show_in_dock_id().clone(),
+            button_settings: tray.settings_id().clone(),
             button_about: tray.about_id().clone(),
             button_quit: tray.quit_id().clone(),
             shortcut_mic: Arc::new(AtomicU32::new(shortcuts.mic_hotkey.id())),
@@ -55,11 +51,35 @@ impl UI {
         let ui = Self {
             tray,
             popup,
+            settings_window,
             shortcuts,
             mic_muted,
-            camera_muted,
         };
         Ok((ui, event_loop, event_ids))
+    }
+
+    pub fn settings_window_id(&self) -> WindowId {
+        self.settings_window.id()
+    }
+
+    pub fn open_settings_window(&self, settings: &Settings) {
+        self.settings_window.open(settings);
+    }
+
+    pub fn close_settings_window(&self) {
+        self.settings_window.close();
+    }
+
+    pub fn is_settings_window_open(&self) -> bool {
+        self.settings_window.is_open()
+    }
+
+    pub fn bind_settings_window_actions(
+        &mut self,
+        settings: Arc<RwLock<Settings>>,
+        proxy: EventLoopProxyMessage,
+    ) {
+        self.settings_window.bind_actions(settings, proxy);
     }
 
     pub fn update_mic(
@@ -73,22 +93,20 @@ impl UI {
             .update(muted, self.popup.get_theme())
             .context("Failed to update UI tray")?;
         self.popup
-            .update_with_camera(muted, self.camera_muted, active_device_name)
+            .update(muted, active_device_name)
             .context("Failed to update UI popup")?;
-        Ok(self)
-    }
-
-    pub fn update_camera(&mut self, muted: bool) -> Result<&mut Self> {
-        trace!("Updating UI camera state {}", muted);
-        self.camera_muted = muted;
-        self.popup
-            .update_with_camera(self.mic_muted, muted, None)
-            .context("Failed to update UI popup for camera")?;
         Ok(self)
     }
 
     pub fn hide_popup(&mut self) -> Result<&mut Self> {
         self.popup.hide().context("Failed to hide UI popup")?;
+        Ok(self)
+    }
+
+    pub fn finalize_hide_popup(&mut self) -> Result<&mut Self> {
+        self.popup
+            .finalize_hide()
+            .context("Failed to finalize UI popup hide")?;
         Ok(self)
     }
 
@@ -101,17 +119,15 @@ impl UI {
             .update_accelerators(&settings.mic_shortcut)
             .context("Failed to update tray accelerators")?;
 
-        // Sync dock visibility and its tray checkbox
-        self.tray.show_in_dock.set_checked(settings.show_in_dock);
-        crate::launch_at_login::set_dock_visible(settings.show_in_dock);
+        // Apply popup duration live (hides any currently-visible pill when set to 0)
+        self.popup.set_popup_duration_ms(settings.popup_duration_ms);
 
-        // Sync launch-at-login plist and its tray checkbox
-        self.tray
-            .launch_at_login
-            .set_checked(settings.launch_at_login);
         if let Err(e) = crate::launch_at_login::set(settings.launch_at_login) {
             log::error!("Failed to apply launch_at_login setting: {}", e);
         }
+
+        // Propagate external settings changes to the visible settings UI.
+        self.settings_window.refresh_from(settings);
 
         Ok(())
     }

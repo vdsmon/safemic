@@ -1,12 +1,16 @@
-use crate::event_loop::EventLoopMessage;
+use crate::event_loop::{EventLoopMessage, EventLoopProxyMessage, Message};
 use crate::popup_content::PopupContent;
 use crate::utils::get_cursor_pos;
 use anyhow::{Context, Result};
+use async_std::task;
 use cocoa::{
     appkit::{NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility},
     base::{id, YES},
 };
 use log::trace;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tao::{
     dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
@@ -16,6 +20,7 @@ use tao::{
 
 const MUTED_TITLE: &str = "Muted";
 const UNMUTED_TITLE: &str = "Unmuted";
+const FADE_DURATION_MS: u64 = 180;
 
 pub type WindowSize<T = f64> = LogicalSize<T>;
 
@@ -61,11 +66,26 @@ pub struct Popup {
     window: Window,
     content: PopupContent,
     current_monitor: Option<MonitorHandle>,
+    /// How long the popup pill stays visible after a mute/unmute event.
+    /// 0 = never show.
+    popup_duration_ms: u64,
+    /// Bumped on every show/hide. Pending `schedule_hide` timers capture the
+    /// current value at spawn time and only fire `HidePopup` if it is still
+    /// the same value, so stale timers from earlier shows become no-ops.
+    generation: Arc<AtomicU64>,
+    proxy: EventLoopProxyMessage,
+    /// Tracks the last `mic_muted` value passed to `update`, so the 200 ms
+    /// enforce-mute poll (which re-emits the same state) does not re-show the
+    /// popup or reset the auto-hide timer.
+    last_mic_muted: Option<bool>,
 }
 
 impl Popup {
-    pub fn new(event_loop: &EventLoopMessage, mic_muted: bool) -> Result<Self> {
-        let camera_muted = false;
+    pub fn new(
+        event_loop: &EventLoopMessage,
+        mic_muted: bool,
+        popup_duration_ms: u64,
+    ) -> Result<Self> {
         let initial_monitor = Popup::get_initial_monitor(event_loop);
         let size = Popup::get_size();
         let scale = initial_monitor
@@ -96,7 +116,7 @@ impl Popup {
         window.set_ignore_cursor_events(true)?;
 
         trace!("Window scale factor {}", scale);
-        let content = PopupContent::new(mic_muted, camera_muted, size, window.theme())?;
+        let content = PopupContent::new(mic_muted, size, window.theme())?;
         unsafe {
             let ns_view = window.ns_view() as id;
             ns_view.addSubview_(content.view);
@@ -109,40 +129,121 @@ impl Popup {
             window,
             content,
             current_monitor: initial_monitor,
+            popup_duration_ms,
+            generation: Arc::new(AtomicU64::new(0)),
+            proxy: event_loop.create_proxy(),
+            last_mic_muted: Some(mic_muted),
         };
         Ok(popup)
     }
 
+    /// Bump the generation so any pending `schedule_hide` task becomes a no-op.
+    fn invalidate_pending_hides(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Spawn a deferred hide: after `popup_duration_ms`, send `Message::HidePopup`
+    /// only if the generation hasn't moved on. Cheap no-op when duration is 0.
+    fn schedule_hide(&self) {
+        let duration_ms = self.popup_duration_ms;
+        if duration_ms == 0 {
+            return;
+        }
+        self.schedule_message(Message::HidePopup, duration_ms);
+    }
+
+    fn schedule_finalize_hide(&self) {
+        self.schedule_message(Message::FinalizeHidePopup, FADE_DURATION_MS);
+    }
+
+    fn schedule_message(&self, msg: Message, delay_ms: u64) {
+        let token = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let gen = self.generation.clone();
+        let proxy = self.proxy.clone();
+        trace!(
+            "schedule_message {:?} token={} delay_ms={}",
+            msg,
+            token,
+            delay_ms
+        );
+        task::spawn(async move {
+            task::sleep(Duration::from_millis(delay_ms)).await;
+            if gen
+                .compare_exchange(token, token, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                let _ = proxy.send_event(msg);
+            }
+        });
+    }
+
     fn get_size() -> WindowSize {
-        LogicalSize::new(250., 40.)
+        // sized to fit the longest possible label ("Mic off" / "Mic on") plus
+        // icon + padding so the pill hugs its content
+        LogicalSize::new(crate::popup_content::max_pill_width(), 40.0)
     }
 
     pub fn get_theme(&self) -> Theme {
         self.window.theme()
     }
 
-    pub fn update_with_camera(
+    pub fn update(
         &mut self,
         mic_muted: bool,
-        camera_muted: bool,
         active_device_name: Option<&str>,
     ) -> Result<&mut Self> {
         self.window.set_title(get_mute_title_text(mic_muted));
         self.update_placement()?;
-        self.content.update(
+        self.content
+            .update(mic_muted, self.get_theme(), active_device_name)?;
+        let mic_changed = self.last_mic_muted != Some(mic_muted);
+        self.last_mic_muted = Some(mic_muted);
+        trace!(
+            "popup.update mic_muted={} changed={} duration_ms={}",
             mic_muted,
-            camera_muted,
-            self.get_theme(),
-            active_device_name,
-        )?;
-        if mic_muted {
+            mic_changed,
+            self.popup_duration_ms
+        );
+
+        if self.popup_duration_ms == 0 {
+            self.invalidate_pending_hides();
+            self.window.set_visible(false);
+        } else if mic_changed {
             self.show_front();
+            self.schedule_hide();
         }
         Ok(self)
     }
 
+    /// Update the popup-duration setting at runtime.
+    /// If switching to 0 while the popup is visible, also hide it immediately.
+    pub fn set_popup_duration_ms(&mut self, popup_duration_ms: u64) {
+        self.popup_duration_ms = popup_duration_ms;
+        self.invalidate_pending_hides();
+        if popup_duration_ms == 0 {
+            self.window.set_visible(false);
+        } else if self.window.is_visible() {
+            self.schedule_hide();
+        }
+    }
+
+    /// Trigger fade-out animation. Window stays visible at alpha=0 until
+    /// `finalize_hide` runs (scheduled after `FADE_DURATION_MS`).
     pub fn hide(&mut self) -> Result<&mut Self> {
+        self.invalidate_pending_hides();
+        self.start_fade_out();
+        self.schedule_finalize_hide();
+        Ok(self)
+    }
+
+    /// Complete the hide: actually remove the window and reset alpha so the
+    /// next `show_front` starts opaque.
+    pub fn finalize_hide(&mut self) -> Result<&mut Self> {
         self.window.set_visible(false);
+        unsafe {
+            let ns_window = self.window.ns_window() as id;
+            let _: () = msg_send![ns_window, setAlphaValue: 1.0_f64];
+        }
         Ok(self)
     }
 
@@ -161,10 +262,18 @@ impl Popup {
             self.current_monitor = Some(monitor);
 
             if was_visible {
-                self.show_front();
+                self.restore_visibility();
             }
         }
         Ok(self)
+    }
+
+    fn restore_visibility(&self) {
+        self.window.set_visible(true);
+        unsafe {
+            let ns_window = self.window.ns_window() as id;
+            let _: () = msg_send![ns_window, orderFrontRegardless];
+        }
     }
 
     pub fn detect_cursor_monitor(&mut self) -> Result<&mut Self> {
@@ -211,10 +320,31 @@ impl Popup {
     }
 
     fn show_front(&self) {
+        self.invalidate_pending_hides();
+        unsafe {
+            let ns_window = self.window.ns_window() as id;
+            // setAlphaValue on the window directly snaps to 1.0 and cancels
+            // any in-flight fade animation from a prior hide().
+            let _: () = msg_send![ns_window, setAlphaValue: 1.0_f64];
+        }
         self.window.set_visible(true);
         unsafe {
             let ns_window = self.window.ns_window() as id;
             let _: () = msg_send![ns_window, orderFrontRegardless];
+        }
+    }
+
+    fn start_fade_out(&self) {
+        let secs = FADE_DURATION_MS as f64 / 1000.0;
+        unsafe {
+            let ns_window = self.window.ns_window() as id;
+            let ctx_class = class!(NSAnimationContext);
+            let _: () = msg_send![ctx_class, beginGrouping];
+            let current: id = msg_send![ctx_class, currentContext];
+            let _: () = msg_send![current, setDuration: secs];
+            let animator: id = msg_send![ns_window, animator];
+            let _: () = msg_send![animator, setAlphaValue: 0.0_f64];
+            let _: () = msg_send![ctx_class, endGrouping];
         }
     }
 

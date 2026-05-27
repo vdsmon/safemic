@@ -1,5 +1,4 @@
 mod about;
-mod camera;
 mod config;
 mod event_loop;
 mod icons;
@@ -8,6 +7,7 @@ mod mic;
 mod popup;
 mod popup_content;
 mod settings;
+mod settings_window;
 mod shortcuts;
 mod tray;
 mod ui;
@@ -17,7 +17,6 @@ mod utils;
 #[macro_use]
 extern crate objc;
 
-use crate::camera::CameraController;
 use crate::config::AppVars;
 use crate::event_loop::{restore_microphone_on_exit, start};
 use crate::mic::MicController;
@@ -38,6 +37,12 @@ extern "C" fn handle_signal(_: libc::c_int) {
 fn main() {
     Builder::from_env(Env::default().default_filter_or("trace")).init();
     info!("Starting app");
+
+    // Remove the pre-rename `com.brettinternet.mic-mute` LaunchAgent so an
+    // upgrade from older versions doesn't leave a stale autoboot entry.
+    if let Err(e) = launch_at_login::migrate_legacy() {
+        log::error!("Legacy launch-agent migration failed: {}", e);
+    }
 
     let mut settings = Settings::load();
 
@@ -78,15 +83,9 @@ fn main() {
         }
     });
 
-    let camera = CameraController::new().unwrap();
-    let camera_muted = camera.muted;
-    let camera = arc_lock(camera);
-    trace!("Camera controller initialized, muted={}", camera_muted);
-
-    let (ui, event_loop, event_ids) =
-        UI::new(mic_muted, camera_muted, app_vars, &settings).unwrap();
+    let (ui, event_loop, event_ids) = UI::new(mic_muted, app_vars, &settings).unwrap();
     trace!("UI initialized");
     let ui = arc_lock(ui);
     let settings = arc_lock(settings);
-    start(event_loop, event_ids, ui, controller, camera, settings);
+    start(event_loop, event_ids, ui, controller, settings);
 }

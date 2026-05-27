@@ -3,7 +3,7 @@ use crate::icons::{rasterize_svg, tray_icon_color};
 use crate::settings::ShortcutConfig;
 use anyhow::{Context, Result};
 use log::trace;
-use muda::{accelerator::Accelerator, CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
+use muda::{accelerator::Accelerator, Menu, MenuId, MenuItem, PredefinedMenuItem};
 use std::fmt;
 use tao::window::Theme;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -64,8 +64,7 @@ impl fmt::Debug for Tray {
 pub struct Tray {
     pub systray: TrayIcon,
     pub toggle_mute: MenuItem,
-    pub launch_at_login: CheckMenuItem,
-    pub show_in_dock: CheckMenuItem,
+    pub settings: MenuItem,
     pub about: MenuItem,
     pub quit: MenuItem,
 }
@@ -75,8 +74,6 @@ impl Tray {
         muted: bool,
         theme: Theme,
         app_vars: AppVars,
-        login_enabled: bool,
-        dock_visible: bool,
         mic_shortcut: &ShortcutConfig,
     ) -> Result<Self> {
         trace!("Creating tray icon");
@@ -87,17 +84,15 @@ impl Tray {
             true,
             Some(accelerator_from_config(mic_shortcut)),
         );
-        let launch_at_login = CheckMenuItem::new("Launch at Login", true, login_enabled, None);
-        let show_in_dock = CheckMenuItem::new("Show in Dock", true, dock_visible, None);
+        let settings = MenuItem::new("Settings…", true, None);
         let about = MenuItem::new("About", true, None);
-        let quit = MenuItem::new("Exit", true, None);
+        let quit = MenuItem::new("Quit Mic Mute", true, None);
 
         tray_menu
             .append_items(&[
                 &toggle_mute,
                 &PredefinedMenuItem::separator(),
-                &launch_at_login,
-                &show_in_dock,
+                &settings,
                 &about,
                 &PredefinedMenuItem::separator(),
                 &quit,
@@ -116,8 +111,7 @@ impl Tray {
         let tray = Self {
             systray,
             toggle_mute,
-            launch_at_login,
-            show_in_dock,
+            settings,
             about,
             quit,
         };
@@ -156,12 +150,8 @@ impl Tray {
         self.toggle_mute.id()
     }
 
-    pub fn launch_at_login_id(&self) -> &MenuId {
-        self.launch_at_login.id()
-    }
-
-    pub fn show_in_dock_id(&self) -> &MenuId {
-        self.show_in_dock.id()
+    pub fn settings_id(&self) -> &MenuId {
+        self.settings.id()
     }
 
     pub fn about_id(&self) -> &MenuId {

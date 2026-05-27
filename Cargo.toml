@@ -3,7 +3,7 @@ name = "mic-mute"
 description = "System-wide mic mute for macOS"
 version = "0.5.1"
 edition = "2021"
-authors = ["Brett Gardiner"]
+authors = ["Victor de Simone Oliveira <victorsmoliveira@gmail.com>"]
 license = "MIT"
 
 default-run = "mic-mute"
@@ -27,7 +27,6 @@ dirs = "6"
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.24"
 objc = "0.2"
-block = "0.1"
 coreaudio-rs = "0.14"
 core-foundation-sys = "0.8"
 objc2-core-audio = { version = "0.3", features = [
@@ -42,7 +41,7 @@ unexpected_cfgs = "allow"
 
 [package.metadata.bundle]
 name = "Mic Mute"
-identifier = "com.brettinternet.mic-mute"
+identifier = "com.vdsmon.mic-mute"
 icon = [
   "assets/icons/16x16.png",
   "assets/icons/16x16@2x.png",
@@ -55,12 +54,12 @@ icon = [
   "assets/icons/512x512.png",
   "assets/icons/512x512@2x.png",
 ]
-copyright = "Copyright (c) Brett Gardiner 2023. All rights reserved."
+copyright = "Copyright (c) Victor de Simone Oliveira 2026. MIT License."
 category = "public.app-category.utilities"
 short_description = "System-wide mic mute for macOS"
 long_description = """
 A system-wide mute for macOS microphones with a global shortcut and visual confirmation of mute status. Inspired by VCM for Windows.
 """
 # osx_frameworks = ["Cocoa", "CoreAudio", "AppKit", "Foundation"]
-osx_url_schemes = ["com.brettinternet.mic-mute"]
+osx_url_schemes = ["com.vdsmon.mic-mute"]
 osx_minimum_system_version = "10"
