@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "mic_mute",
+  "project_id": "a8a8ae9d-ae7d-45a7-914c-c3611fc5d677"
+}

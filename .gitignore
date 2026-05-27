@@ -14,3 +14,8 @@
 # System
 .DS_Store
 .rapidfire/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
