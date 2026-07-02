@@ -64,6 +64,9 @@ run = [
 [tasks."release:deps"]
 description = "Install rcodesign + toml-cli if missing"
 hide = true
+# Chained (not a sibling) after build:deps: parallel cargo installs race on
+# rustup's shared component download on fresh CI runners.
+depends = ["build:deps"]
 run = [
     "cargo install apple-codesign",
     "cargo install toml-cli",
@@ -72,7 +75,7 @@ outputs = ["~/.cargo/bin/rcodesign", "~/.cargo/bin/toml"]
 
 [tasks.release]
 description = "Build, sign, and package signed DMG"
-depends = ["build:deps", "release:deps"]
+depends = ["release:deps"]
 env = { RUST_LOG = "warn" }
 run = '''
 cargo clean
