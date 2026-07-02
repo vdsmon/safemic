@@ -28,19 +28,24 @@ pub fn popup_icon_color(muted: bool, theme: Theme) -> IconColor {
     }
 }
 
-pub fn tray_icon_color(muted: bool) -> IconColor {
-    if muted {
-        IconColor {
+pub fn tray_icon_color(muted: bool, theme: Theme) -> IconColor {
+    match theme {
+        Theme::Light if muted => IconColor {
             r: 239,
             g: 68,
             b: 68,
-        } // #ef4444
-    } else {
-        IconColor {
+        }, // #ef4444
+        Theme::Light => IconColor { r: 0, g: 0, b: 0 },
+        Theme::Dark if muted => IconColor {
+            r: 248,
+            g: 113,
+            b: 113,
+        }, // #f87171
+        _ => IconColor {
             r: 255,
             g: 255,
             b: 255,
-        }
+        },
     }
 }
 
@@ -87,4 +92,29 @@ pub fn rasterize_svg(svg_bytes: &[u8], color: &IconColor) -> Result<(Vec<u8>, u3
         .collect();
 
     Ok((straight, w, h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rgb(color: IconColor) -> (u8, u8, u8) {
+        (color.r, color.g, color.b)
+    }
+
+    #[test]
+    fn tray_icon_unmuted_uses_black_in_light_theme() {
+        assert_eq!(rgb(tray_icon_color(false, Theme::Light)), (0, 0, 0));
+    }
+
+    #[test]
+    fn tray_icon_unmuted_uses_white_in_dark_theme() {
+        assert_eq!(rgb(tray_icon_color(false, Theme::Dark)), (255, 255, 255));
+    }
+
+    #[test]
+    fn tray_icon_muted_uses_theme_appropriate_red() {
+        assert_eq!(rgb(tray_icon_color(true, Theme::Light)), (239, 68, 68));
+        assert_eq!(rgb(tray_icon_color(true, Theme::Dark)), (248, 113, 113));
+    }
 }

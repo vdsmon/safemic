@@ -19,11 +19,11 @@ pub fn get_mute_menu_text(muted: bool) -> &'static str {
     }
 }
 
-fn get_image(muted: bool, _theme: Theme) -> Result<(Vec<u8>, u32, u32)> {
+fn get_image(muted: bool, theme: Theme) -> Result<(Vec<u8>, u32, u32)> {
     const MIC_ON: &[u8] = include_bytes!("../assets/mic.svg");
     const MIC_OFF: &[u8] = include_bytes!("../assets/mic-off.svg");
     let svg = if muted { MIC_OFF } else { MIC_ON };
-    rasterize_svg(svg, &tray_icon_color(muted))
+    rasterize_svg(svg, &tray_icon_color(muted, theme))
 }
 
 fn get_icon(muted: bool, theme: Theme) -> Result<Icon> {

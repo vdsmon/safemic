@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "safemic"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "async-std",
