@@ -163,6 +163,13 @@ extern "C" fn cancel_operation(this: &Object, _: Sel, _sender: *mut Object) {
     take_and_finish(this, CaptureResult::Cancelled);
 }
 
+/// The recorder view covers the chip, so it swallows clicks that would
+/// otherwise reach the record button. Treat a click as cancel to keep the
+/// "click the chip again to stop recording" affordance working.
+extern "C" fn mouse_down(this: &Object, _: Sel, _event: *mut Object) {
+    take_and_finish(this, CaptureResult::Cancelled);
+}
+
 /// Pull the active recorder state out of the slot, only if the firing view
 /// is the one we registered. Avoids a stale view racing teardown.
 fn take_and_finish(view: &Object, result: CaptureResult) {
@@ -302,6 +309,10 @@ fn recorder_class() -> &'static Class {
             decl.add_method(
                 sel!(cancelOperation:),
                 cancel_operation as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(mouseDown:),
+                mouse_down as extern "C" fn(&Object, Sel, *mut Object),
             );
         }
         decl.register()

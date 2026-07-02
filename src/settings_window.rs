@@ -172,6 +172,11 @@ impl SettingsWindow {
 
     pub fn close(&self) {
         trace!("Closing settings window");
+        // Tear down any in-flight recorder so the window doesn't reopen with a
+        // phantom recording state (orphaned recorder view swallowing clicks,
+        // escape_btn disabled). Fires handle_capture(Cancelled), which resets
+        // is_recording and the chip visuals. No-op when not recording.
+        shortcut_recorder::cancel_recording();
         self.window.set_visible(false);
         self.is_open.store(false, Ordering::SeqCst);
     }
@@ -190,11 +195,20 @@ impl SettingsWindow {
                     &format_seconds(settings.popup_duration_ms),
                 );
             }
-            set_string(
-                self.shortcut_label,
-                &format_shortcut(&settings.mic_shortcut),
-            );
-            resize_chip_to_fit(self.shortcut_chip, self.shortcut_label, self.record_btn);
+            // Leave the chip alone while a recording is in flight: a debounced
+            // popup-duration commit can land here via ApplySettings and would
+            // otherwise replace the "Recording…" placeholder mid-capture.
+            let recording = self
+                .action_target
+                .map(|t| ctx_from(&*t).is_recording.get())
+                .unwrap_or(false);
+            if !recording {
+                set_string(
+                    self.shortcut_label,
+                    &format_shortcut(&settings.mic_shortcut),
+                );
+                resize_chip_to_fit(self.shortcut_chip, self.shortcut_label, self.record_btn);
+            }
         }
     }
 
@@ -202,6 +216,9 @@ impl SettingsWindow {
     /// into a named non-default state so a single screencapture captures the
     /// recording / warning / status pulse appearance without a human click.
     /// No-op for unknown labels and when called before `bind_actions`.
+    /// Debug-only: the sidecar builds the debug profile; release app binaries
+    /// don't carry the QA scaffolding.
+    #[cfg(debug_assertions)]
     #[allow(dead_code)]
     pub fn preview_state(&self, state: &str) {
         let Some(target) = self.action_target else {
@@ -215,10 +232,23 @@ impl SettingsWindow {
                 "recording" => {
                     let _: () = msg_send![target,
                         performSelector: sel!(recordShortcutAction:) withObject: nil];
+                    // Snapshots are taken without spinning the run loop, so
+                    // animator-driven alphas may not have flushed. Force the
+                    // helper text visible for a deterministic capture.
+                    let _: () = msg_send![ctx.warning_label, setAlphaValue: 1.0_f64];
                 }
-                "warning" => show_warning(this, ctx, "\u{26A0} Already in use"),
-                "status_ok" => show_status(this, ctx, true),
-                "status_err" => show_status(this, ctx, false),
+                "warning" => {
+                    show_warning(this, ctx, "\u{26A0} Already in use");
+                    let _: () = msg_send![ctx.warning_label, setAlphaValue: 1.0_f64];
+                }
+                "status_ok" => {
+                    show_status(this, ctx, true);
+                    let _: () = msg_send![ctx.status_label, setAlphaValue: 1.0_f64];
+                }
+                "status_err" => {
+                    show_status(this, ctx, false);
+                    let _: () = msg_send![ctx.status_label, setAlphaValue: 1.0_f64];
+                }
                 _ => {}
             }
         }
@@ -230,6 +260,8 @@ impl SettingsWindow {
     /// does NOT need Screen Recording permission and does NOT involve the
     /// window server compositor. Captures focus rings, layer-backed views,
     /// title bar, and the chip's CALayer fill correctly.
+    /// Debug-only, same rationale as `preview_state`.
+    #[cfg(debug_assertions)]
     #[allow(dead_code)]
     pub fn snapshot_to_png(&self, path: &str) -> Result<()> {
         unsafe {
@@ -238,8 +270,8 @@ impl SettingsWindow {
             if content_view == nil {
                 return Err(anyhow::anyhow!("no content view"));
             }
-            // The contentView's superview is the window's themeFrame — root
-            // of the window's view hierarchy, includes titlebar background.
+            // The contentView's superview is the window's themeFrame, the root
+            // of the window's view hierarchy; it includes titlebar background.
             let root_view: id = msg_send![content_view, superview];
             let target = if root_view == nil {
                 content_view
@@ -330,10 +362,16 @@ extern "C" fn popup_duration_commit(this: &Object, _cmd: Sel, _timer: *mut Objec
                 .to_string()
         }
     };
-    let parsed = trimmed.parse::<f64>().ok();
+    // parse::<f64> accepts "inf"/"nan"/"1e999"; without the finiteness and
+    // range check those saturate `as u64` to u64::MAX and persist a popup
+    // that never auto-hides. Cap at one day, well past any sane duration.
+    let parsed = trimmed
+        .parse::<f64>()
+        .ok()
+        .filter(|s| s.is_finite() && *s <= 86_400.0);
     match parsed {
         None => {
-            // Empty / unparseable — revert to persisted value, no save.
+            // Empty / unparseable / absurd: revert to persisted value, no save.
             let current = ctx.settings.read().unwrap().popup_duration_ms;
             unsafe { set_string(ctx.popup_ms_field, &format_seconds(current)) };
         }
@@ -344,13 +382,41 @@ extern "C" fn popup_duration_commit(this: &Object, _cmd: Sel, _timer: *mut Objec
     }
 }
 
-/// Format a millisecond duration as a seconds string with one decimal place
-/// (e.g. `1000` → `"1.0"`, `1500` → `"1.5"`, `0` → `"0"`).
+/// Format a millisecond duration as a seconds string (e.g. `1000` → `"1.0"`,
+/// `1500` → `"1.5"`, `0` → `"0"`). Values finer than 0.1s keep their full
+/// precision (`1250` → `"1.25"`) so display → parse round-trips losslessly.
 fn format_seconds(ms: u64) -> String {
     if ms == 0 {
         return "0".to_string();
     }
-    format!("{:.1}", ms as f64 / 1000.0)
+    let s = ms as f64 / 1000.0;
+    if ms.is_multiple_of(100) {
+        format!("{:.1}", s)
+    } else {
+        format!("{}", s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_seconds;
+
+    #[test]
+    fn test_format_seconds_round_trips_ms_values() {
+        for ms in [0u64, 100, 1000, 1250, 1500, 12345, 86_400_000] {
+            let displayed = format_seconds(ms);
+            let parsed = displayed.parse::<f64>().unwrap();
+            assert_eq!((parsed * 1000.0).round() as u64, ms, "via {:?}", displayed);
+        }
+    }
+
+    #[test]
+    fn test_format_seconds_display() {
+        assert_eq!(format_seconds(0), "0");
+        assert_eq!(format_seconds(1000), "1.0");
+        assert_eq!(format_seconds(1500), "1.5");
+        assert_eq!(format_seconds(1250), "1.25");
+    }
 }
 
 fn persist_and_pulse(
@@ -385,16 +451,9 @@ fn persist_and_pulse(
 fn show_status(this: &Object, ctx: &ActionContext, ok: bool) {
     unsafe {
         let (text, color): (&str, id) = if ok {
-            (
-                "\u{2713} Saved",
-                msg_send![class!(NSColor), tertiaryLabelColor],
-            )
+            ("\u{2713} Saved", tertiary_label_color())
         } else {
-            (
-                "\u{2717} Could not save",
-                msg_send![class!(NSColor),
-                    colorWithSRGBRed: 0.949_f64 green: 0.404_f64 blue: 0.373_f64 alpha: 1.0_f64],
-            )
+            ("\u{2717} Could not save", warning_color())
         };
         set_string(ctx.status_label, text);
         let _: () = msg_send![ctx.status_label, setTextColor: color];
@@ -437,19 +496,18 @@ fn enter_recording_visual(ctx: &ActionContext) {
         let _: () = msg_send![layer, setBorderWidth: 2.0_f64];
         set_string(ctx.shortcut_label, RECORDING_PLACEHOLDER);
         resize_chip_to_fit_ctx(ctx);
-        // Recording helper is instructional, not a conflict — widen the frame
+        // Recording helper is instructional, not a conflict: widen the frame
         // to full content width so the message doesn't truncate.
         set_warning_frame(ctx, true);
         set_string(ctx.warning_label, "Press a key combination. Esc to cancel.");
-        let _: () = msg_send![ctx.warning_label, setTextColor: helper_color()];
+        let _: () = msg_send![ctx.warning_label, setTextColor: tertiary_label_color()];
         animate_single_alpha(ctx.warning_label, 1.0, 0.10);
     }
 }
 
 unsafe fn set_warning_frame(ctx: &ActionContext, full_width: bool) {
     let chip_frame: NSRect = msg_send![ctx.shortcut_chip, frame];
-    // y stays just below the chip (16pt below chip's bottom edge).
-    let y = chip_frame.origin.y - 18.0;
+    let y = chip_frame.origin.y - WARNING_OFFSET;
     let (x, w) = if full_width {
         (SIDE_PAD, WINDOW_SIZE.width - 2.0 * SIDE_PAD)
     } else {
@@ -460,27 +518,22 @@ unsafe fn set_warning_frame(ctx: &ActionContext, full_width: bool) {
 
 fn exit_recording_visual(ctx: &ActionContext) {
     unsafe {
-        let layer: id = msg_send![ctx.shortcut_chip, layer];
-        let c: id = msg_send![class!(NSColor),
-            colorWithSRGBRed: 1.0_f64 green: 1.0_f64 blue: 1.0_f64 alpha: 0.15_f64];
-        let cg: *mut c_void = msg_send![c, CGColor];
-        let _: () = msg_send![layer, setBorderColor: cg];
-        let _: () = msg_send![layer, setBorderWidth: 1.0_f64];
+        reset_chip_border(ctx);
         // Fade the recording helper text out. show_warning's red copy will
         // override this if a conflict triggered the exit.
         animate_single_alpha(ctx.warning_label, 0.0, 0.10);
     }
 }
 
-unsafe fn helper_color() -> id {
-    msg_send![class!(NSColor), tertiaryLabelColor]
-}
-
 fn show_warning(this: &Object, ctx: &ActionContext, text: &str) {
     unsafe {
-        // Conflict messages bind to the chip — narrow frame under the control.
-        set_warning_frame(ctx, false);
         set_string(ctx.warning_label, text);
+        // Conflict messages bind to the chip: narrow frame under the control.
+        // Long reserved-shortcut names ("Screenshot to clipboard") overflow
+        // that width, so fall back to the full content width when needed.
+        let intrinsic: NSSize = msg_send![ctx.warning_label, intrinsicContentSize];
+        let narrow_w = WINDOW_SIZE.width - CONTROL_X - SIDE_PAD;
+        set_warning_frame(ctx, intrinsic.width > narrow_w);
         let _: () = msg_send![ctx.warning_label, setTextColor: warning_color()];
         animate_single_alpha(ctx.warning_label, 1.0, 0.12);
         // Red chip border binds the warning text visually to the offending field.
@@ -518,10 +571,7 @@ fn clear_warning(ctx: &ActionContext) {
 fn reset_chip_border(ctx: &ActionContext) {
     unsafe {
         let layer: id = msg_send![ctx.shortcut_chip, layer];
-        let border: id = msg_send![class!(NSColor),
-            colorWithSRGBRed: 0.337_f64 green: 0.337_f64 blue: 0.337_f64 alpha: 0.6_f64];
-        let cg: *mut c_void = msg_send![border, CGColor];
-        let _: () = msg_send![layer, setBorderColor: cg];
+        let _: () = msg_send![layer, setBorderColor: idle_border_cg()];
         let _: () = msg_send![layer, setBorderWidth: 1.0_f64];
     }
 }
@@ -731,7 +781,7 @@ struct BuiltViews {
 }
 
 /// Form layout constants (logical points). Change a single value here to
-/// reshape the entire window — no inline magic numbers in build_content_view.
+/// reshape the entire window; no inline magic numbers in build_content_view.
 const SIDE_PAD: f64 = 28.0;
 const TOP_PAD: f64 = 18.0;
 const ROW_H: f64 = 32.0;
@@ -753,6 +803,8 @@ const STATUS_LABEL_W: f64 = 130.0;
 const STATUS_LABEL_H: f64 = 16.0;
 const STATUS_BOTTOM_MARGIN: f64 = 18.0;
 const WARNING_H: f64 = 16.0;
+/// Distance from the chip's bottom edge down to the warning label's top.
+const WARNING_OFFSET: f64 = 18.0;
 
 unsafe fn build_content_view(window: &Window) -> BuiltViews {
     apply_window_chrome(window.ns_window() as id);
@@ -777,7 +829,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             warning_label,
             CONTROL_X,
-            y - 18.0,
+            y - WARNING_OFFSET,
             w - CONTROL_X - SIDE_PAD,
             WARNING_H,
         ),
@@ -851,30 +903,31 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
 }
 
 /// Create + position a form label, right-aligned at LABEL_GUTTER and
-/// vertically centered in the row. sizeToFit gives the label its intrinsic
-/// width/height, which then drives the centered placement.
+/// vertically centered in the row.
 unsafe fn place_form_label(cv: id, text: &str, row_top: f64) {
-    let lbl = make_form_label(text);
-    let _: () = msg_send![lbl, sizeToFit];
-    let lf: NSRect = msg_send![lbl, frame];
-    let lw = lf.size.width;
-    let lh = lf.size.height;
-    let lx = LABEL_GUTTER - lw;
-    let ly = vcenter_in_row(row_top, lh);
-    set_frame(lbl, lx, ly, lw, lh);
-    add(cv, lbl);
+    place_intrinsic_label(cv, make_form_label(text), |w| LABEL_GUTTER - w, row_top);
 }
 
-/// Place a help label (e.g. "ms") pinned to `x` with its intrinsic width, so
+/// Place a help label (e.g. "s") pinned to `x` with its intrinsic width, so
 /// it neither truncates nor stretches into the right margin.
 unsafe fn place_help_label(cv: id, text: &str, x: f64, row_top: f64) {
-    let lbl = make_help_label(text);
+    place_intrinsic_label(cv, make_help_label(text), |_| x, row_top);
+}
+
+/// sizeToFit gives the label its intrinsic width/height; `x_for_width` maps
+/// that width to the label's left edge (right-aligned gutter or fixed pin).
+unsafe fn place_intrinsic_label(
+    cv: id,
+    lbl: id,
+    x_for_width: impl FnOnce(f64) -> f64,
+    row_top: f64,
+) {
     let _: () = msg_send![lbl, sizeToFit];
     let lf: NSRect = msg_send![lbl, frame];
     let lw = lf.size.width;
     let lh = lf.size.height;
     let ly = vcenter_in_row(row_top, lh);
-    set_frame(lbl, x, ly, lw, lh);
+    set_frame(lbl, x_for_width(lw), ly, lw, lh);
     add(cv, lbl);
 }
 
@@ -889,9 +942,7 @@ unsafe fn make_form_label(text: &str) -> id {
         system_font(14.0, NS_FONT_WEIGHT_REGULAR),
         secondary_label_color(),
     );
-    let s = NSString::alloc(nil).init_str(text);
-    let _: () = msg_send![label, setStringValue: s];
-    let _: () = msg_send![s, release];
+    set_string(label, text);
     let _: () = msg_send![label, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
     label
 }
@@ -946,9 +997,7 @@ unsafe fn make_help_label(text: &str) -> id {
         system_font(12.0, NS_FONT_WEIGHT_REGULAR),
         tertiary_label_color(),
     );
-    let s = NSString::alloc(nil).init_str(text);
-    let _: () = msg_send![label, setStringValue: s];
-    let _: () = msg_send![s, release];
+    set_string(label, text);
     label
 }
 
@@ -970,7 +1019,7 @@ unsafe fn make_status_label() -> id {
 }
 
 unsafe fn make_chip_label() -> id {
-    // 13pt matches the popup-duration field font so both controls in the form
+    // 14pt matches the popup-duration field font so both controls in the form
     // have the same type weight.
     let font: id = msg_send![class!(NSFont), monospacedSystemFontOfSize: 14.0_f64 weight: NS_FONT_WEIGHT_MEDIUM];
     let label = make_plain_label(font, label_color());
@@ -995,13 +1044,18 @@ unsafe fn make_chip_view(x: f64, y: f64, w: f64, h: f64) -> id {
         colorWithSRGBRed: 0.117_f64 green: 0.117_f64 blue: 0.117_f64 alpha: 1.0_f64];
     let bg_cg: *mut c_void = msg_send![bg, CGColor];
     let _: () = msg_send![layer, setBackgroundColor: bg_cg];
-    let border: id = msg_send![class!(NSColor),
-        colorWithSRGBRed: 0.337_f64 green: 0.337_f64 blue: 0.337_f64 alpha: 0.6_f64];
-    let border_cg: *mut c_void = msg_send![border, CGColor];
-    let _: () = msg_send![layer, setBorderColor: border_cg];
+    let _: () = msg_send![layer, setBorderColor: idle_border_cg()];
     let _: () = msg_send![layer, setBorderWidth: 1.0_f64];
     let _: () = msg_send![layer, setCornerRadius: 8.0_f64];
     v
+}
+
+/// Idle chip border, shared by the chip factory and every reset path so the
+/// resting border can't drift between a fresh window and a post-recording one.
+unsafe fn idle_border_cg() -> *mut c_void {
+    let c: id = msg_send![class!(NSColor),
+        colorWithSRGBRed: 0.337_f64 green: 0.337_f64 blue: 0.337_f64 alpha: 0.6_f64];
+    msg_send![c, CGColor]
 }
 
 unsafe fn make_layer_view(x: f64, y: f64, w: f64, h: f64) -> id {
@@ -1016,12 +1070,12 @@ unsafe fn resize_chip_to_fit(chip: id, inner_label: id, record_btn: id) {
     // Measure the label's intrinsic content size, pad horizontally, and pick
     // the chip's right edge so the chip never overflows the window margin.
     //
-    // Default state (chip_w == CONTROL_W): right edge at CONTROL_X + CONTROL_W
-    // — flush with the field/switch column below.
+    // Default state (chip_w == CONTROL_W): right edge at CONTROL_X + CONTROL_W,
+    // flush with the field/switch column below.
     // Recording state (chip_w > CONTROL_W): right edge at the window's right
-    // padding — row 1 has no help-rail, so this space is free.
+    // padding (row 1 has no help-rail, so this space is free).
     //
-    // intrinsicContentSize (not sizeToFit) — sizeToFit wraps to the current
+    // intrinsicContentSize, not sizeToFit: sizeToFit wraps to the current
     // frame width on multi-line cells, which underreports the natural width.
     let intrinsic: NSSize = msg_send![inner_label, intrinsicContentSize];
     let text_w = intrinsic.width.max(28.0);
@@ -1078,10 +1132,12 @@ unsafe fn make_invisible_button(tooltip: &str) -> id {
     let _: () = msg_send![btn, setTitle: empty];
     let _: () = msg_send![empty, release];
     let _: () = msg_send![btn, setBordered: NO];
-    let _: () = msg_send![btn, setBezelStyle: 0i64];
     let _: () = msg_send![btn, setTransparent: YES];
     let tt = NSString::alloc(nil).init_str(tooltip);
     let _: () = msg_send![btn, setToolTip: tt];
+    // Tooltips surface as accessibilityHelp, not the label; without this the
+    // empty-title button is announced as an unnamed control by VoiceOver.
+    let _: () = msg_send![btn, setAccessibilityLabel: tt];
     let _: () = msg_send![tt, release];
     btn
 }
@@ -1089,6 +1145,12 @@ unsafe fn make_invisible_button(tooltip: &str) -> id {
 unsafe fn make_warning_label() -> id {
     let label = make_plain_label(system_font(12.0, NS_FONT_WEIGHT_REGULAR), warning_color());
     let _: () = msg_send![label, setAlphaValue: 0.0_f64];
+    // Single line so intrinsicContentSize reports the natural text width
+    // (show_warning uses it to pick the narrow or full-width frame).
+    let cell: id = msg_send![label, cell];
+    let _: () = msg_send![cell, setUsesSingleLineMode: YES];
+    let _: () = msg_send![cell, setWraps: NO];
+    let _: () = msg_send![cell, setScrollable: YES];
     label
 }
 
@@ -1100,9 +1162,7 @@ unsafe fn warning_color() -> id {
 
 /// Red used for the conflict-state chip border (matches the warning text).
 unsafe fn conflict_border_cg() -> *mut c_void {
-    let c: id = msg_send![class!(NSColor),
-        colorWithSRGBRed: 0.949_f64 green: 0.404_f64 blue: 0.373_f64 alpha: 1.0_f64];
-    msg_send![c, CGColor]
+    msg_send![warning_color(), CGColor]
 }
 
 /// Macos system accent color (adapts to user pref). Used for the recording
@@ -1122,9 +1182,14 @@ unsafe fn make_mono_text_field() -> id {
     let _: () = msg_send![field, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
     let font: id = msg_send![class!(NSFont), monospacedDigitSystemFontOfSize: 14.0_f64 weight: NS_FONT_WEIGHT_REGULAR];
     let _: () = msg_send![field, setFont: font];
-    let placeholder = NSString::alloc(nil).init_str("1000");
+    // Placeholder mirrors format_seconds(default 1000ms); the field edits
+    // seconds, not milliseconds.
+    let placeholder = NSString::alloc(nil).init_str("1.0");
     let _: () = msg_send![field, setPlaceholderString: placeholder];
     let _: () = msg_send![placeholder, release];
+    let tt = NSString::alloc(nil).init_str("Seconds. 0 = never show.");
+    let _: () = msg_send![field, setToolTip: tt];
+    let _: () = msg_send![tt, release];
     field
 }
 
