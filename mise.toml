@@ -72,7 +72,7 @@ outputs = ["~/.cargo/bin/rcodesign", "~/.cargo/bin/toml"]
 
 [tasks.release]
 description = "Build, sign, and package signed DMG"
-depends = ["release:deps"]
+depends = ["build:deps", "release:deps"]
 env = { RUST_LOG = "warn" }
 run = '''
 cargo clean
