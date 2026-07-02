@@ -84,6 +84,13 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p Casks
           cp /tmp/safemic.rb Casks/safemic.rb
+          # Rerun-safe: if the tap already carries this exact cask (manual
+          # bump or a rerun after a merged bump PR), skip the branch and PR.
+          if [ -z "$(git status --porcelain -- Casks/safemic.rb)" ]; then
+            echo "Cask already up to date on tap main; skipping bump PR."
+            echo "TAP_UP_TO_DATE=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
           git checkout -B "bump-safemic-${VERSION}"
           git add Casks/safemic.rb
           git commit -m "safemic ${VERSION}"
@@ -94,6 +101,10 @@ jobs:
           GH_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
         run: |
           set -euo pipefail
+          if [ "${TAP_UP_TO_DATE:-0}" = "1" ]; then
+            echo "Tap already current; no PR needed."
+            exit 0
+          fi
           cd tap
           existing="$(gh pr list --head "bump-safemic-${VERSION}" --state open --json number --jq '.[0].number // empty')"
           if [ -z "$existing" ]; then
