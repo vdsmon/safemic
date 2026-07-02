@@ -13,8 +13,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install mise
         uses: jdx/mise-action@v2
@@ -44,9 +42,13 @@ jobs:
       - name: Compute sha256
         run: |
           set -euo pipefail
-          shasum -a 256 safemic-*.dmg | tee safemic-*.dmg.sha256
-          echo "DMG=$(ls safemic-*.dmg)" >> "$GITHUB_ENV"
-          echo "SHA256=$(awk '{print $1}' safemic-*.dmg.sha256)" >> "$GITHUB_ENV"
+          # Resolve the DMG name first: `tee safemic-*.dmg.sha256` matches no
+          # existing file, so the glob would stay literal and the published
+          # checksum asset would be named with an asterisk.
+          DMG="$(ls safemic-*.dmg)"
+          shasum -a 256 "$DMG" | tee "$DMG.sha256"
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+          echo "SHA256=$(awk '{print $1}' "$DMG.sha256")" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

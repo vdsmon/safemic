@@ -5,7 +5,7 @@ use crate::ui::UI;
 use global_hotkey::GlobalHotKeyEvent;
 use log::trace;
 use muda::{MenuEvent, MenuId};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tao::event::{Event, WindowEvent};
@@ -16,8 +16,12 @@ const POLL_INTERVAL_MILLIS: u64 = 200;
 
 // dev signal hook: SIGUSR1 opens the Settings window. Lets a script
 // drive the UI without Accessibility-grant'd osascript clicks.
-pub static OPEN_SETTINGS_REQUESTED: AtomicBool = AtomicBool::new(false);
+// Debug builds only; release binaries keep SIGUSR1's default disposition.
+#[cfg(debug_assertions)]
+pub static OPEN_SETTINGS_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
+#[cfg(debug_assertions)]
 pub extern "C" fn handle_sigusr1(_: libc::c_int) {
     OPEN_SETTINGS_REQUESTED.store(true, Ordering::SeqCst);
 }
@@ -174,6 +178,7 @@ pub fn start(
             _ => {}
         };
 
+        #[cfg(debug_assertions)]
         if OPEN_SETTINGS_REQUESTED.swap(false, Ordering::SeqCst) {
             trace!("SIGUSR1 received, opening Settings window");
             let s = settings.read().unwrap();

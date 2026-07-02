@@ -9,8 +9,8 @@ Prefer `mise run <task>` (defined in `mise.toml`) over raw cargo. Build/release 
 | Command | What it does |
 |---|---|
 | `mise run init` | Install dev deps (mise tools + lefthook hooks). Run once. |
-| `mise run start` | `watchexec --poll 500ms` + `cargo run` with `RUST_LOG=info,mic_mute=trace`. Live-reload dev loop. |
-| `mise run build` | `cargo build --locked --release --target aarch64-apple-darwin` then `cargo bundle` → `target/aarch64-apple-darwin/release/bundle/osx/Mic Mute.app`. Opens Finder to bundle. |
+| `mise run start` | `watchexec --poll 500ms` + `cargo run` with `RUST_LOG=info,safemic=trace`. Live-reload dev loop. |
+| `mise run build` | `cargo build --locked --release --target aarch64-apple-darwin` then `cargo bundle` → `target/aarch64-apple-darwin/release/bundle/osx/SafeMic.app`. Opens Finder to bundle. |
 | `mise run check` (alias `lint`) | `cargo clippy --locked --release -- -D warnings` + `cargo fmt -- --check`. CI gate. |
 | `mise run fix` | clippy --fix + cargo fmt. |
 | `mise run test` | `cargo test`. |
@@ -46,7 +46,7 @@ Single-binary tray app. macOS-only (uses cocoa/CoreAudio directly). Entry point 
   1. `MenuEvent::receiver()` — tray clicks (quit, toggle mute, settings, about).
   2. `GlobalHotKeyEvent::receiver()` — system-wide hotkey presses (filter to `Pressed` only; library fires both press + release).
   3. `MicController` poll every `POLL_INTERVAL_MILLIS=200` ms — re-asserts mute on newly-plugged devices via `should_enforce_mute()`.
-  4. Settings file mtime poll every 2 s — when `~/Library/Application Support/mic-mute/settings.json` changes on disk, reload + `UI::apply_settings(&new)` so external edits take effect without restart.
+  4. Settings file mtime poll every 2 s — when `~/Library/Application Support/safemic/settings.json` changes on disk, reload + `UI::apply_settings(&new)` so external edits take effect without restart.
   Also handles user events: `Message::HidePopup`, `Message::FinalizeHidePopup` (fade-out animation completion), `Message::ApplySettings`, `Message::CloseSettings`.
 - `mic.rs` — `MicController`. Wraps CoreAudio `kAudioDevicePropertyMute` on the input scope of every input device; falls back to input-volume-to-zero (with restore on unmute) when the device has no mute property. Polls device list to catch hot-plugged USB/BT mics. iPhone Continuity Mic is intentionally skipped.
 - `ui.rs` — `UI` aggregates `Tray`, `Popup`, `SettingsWindow`, `Shortcuts`. `apply_settings()` is the live-reload entry point — idempotent, called by the `Message::ApplySettings` handler (Save click) and the mtime-poll path. When a setting fans out to OS state (launch_at_login plist), `apply_settings` also re-applies that.
@@ -62,7 +62,7 @@ Single-binary tray app. macOS-only (uses cocoa/CoreAudio directly). Entry point 
 
 ### Settings flow
 
-`~/Library/Application Support/mic-mute/settings.json` is the source of truth. Two write paths:
+`~/Library/Application Support/safemic/settings.json` is the source of truth. Two write paths:
 1. Settings window Save click — `MMSettingsActions::saveAction:` writes to `Settings`, persists, then dispatches `Message::ApplySettings` so the main thread reloads + applies.
 2. User text-edits the file — mtime poll detects it, calls `Settings::load()` + `UI::apply_settings()`.
 
@@ -78,7 +78,7 @@ For NSButton/NSMenuItem callbacks: declare a custom `NSObject` subclass via `obj
 
 ## macOS specifics
 
-- App is unsigned by default (no Apple Developer ID). After `mise run build`, users need `xattr -dr com.apple.quarantine "/Applications/Mic Mute.app"` or the "Open Anyway" dance in System Settings → Privacy & Security.
+- App is unsigned by default (no Apple Developer ID). After `mise run build`, users need `xattr -dr com.apple.quarantine "/Applications/SafeMic.app"` or the "Open Anyway" dance in System Settings → Privacy & Security.
 - First launch needs **Accessibility** + **Input Monitoring** permissions (global hotkey) and **Microphone** permission (CoreAudio reads). No auto-prompt for Accessibility — user must add it manually.
 - `mise run release` uses `rcodesign` with a self-signed cert (`sign.crt` from openssl), not Apple notarization. DMG is unsigned.
 - Bundle identifier is hardcoded in `Cargo.toml` `[package.metadata.bundle]`. Don't change it without coordinating with `launch_at_login.rs` plist label.
@@ -87,7 +87,7 @@ For NSButton/NSMenuItem callbacks: declare a custom `NSObject` subclass via `obj
 ## Conventions
 
 - Anyhow `Result<T>` everywhere user-facing, with `.context("...")` at boundary calls. No custom error types.
-- `log::trace!` is dense and assumed on in dev (`RUST_LOG=info,mic_mute=trace` in `mise run start`). `log::error!` for recoverable errors that shouldn't crash. `.unwrap()` is used liberally for invariants that genuinely can't fail.
+- `log::trace!` is dense and assumed on in dev (`RUST_LOG=info,safemic=trace` in `mise run start`). `log::error!` for recoverable errors that shouldn't crash. `.unwrap()` is used liberally for invariants that genuinely can't fail.
 - `cargo clippy -- -D warnings` is enforced — fix lints, don't `#[allow]` unless there's a real reason. The single `[lints.rust] unexpected_cfgs = "allow"` in Cargo.toml is there because `objc 0.2.x` macros trip it.
 
 
