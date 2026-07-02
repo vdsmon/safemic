@@ -57,11 +57,22 @@ pub struct EventIds {
 
 fn update_mic(ui: Arc<RwLock<UI>>, controller: Arc<RwLock<MicController>>, toggle: bool) {
     let mut controller = controller.write().unwrap();
-    if toggle || controller.should_enforce_mute() {
+    let enforce_mute = controller.should_enforce_mute();
+    let mut should_update_ui = toggle || enforce_mute;
+
+    if should_update_ui {
         let state = if toggle { None } else { Some(true) };
         if let Err(err) = controller.toggle(state) {
             log::error!("Failed to update microphone mute state: {}", err);
         }
+    } else {
+        match controller.refresh_state() {
+            Ok(changed) => should_update_ui = changed,
+            Err(err) => log::error!("Failed to refresh microphone mute state: {}", err),
+        }
+    }
+
+    if should_update_ui {
         let device_name = controller.active_device_name();
         let mut ui = ui.write().unwrap();
         ui.update_mic(controller.muted, device_name.as_deref())

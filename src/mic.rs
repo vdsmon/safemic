@@ -718,6 +718,13 @@ impl<B: AudioBackend> MicController<B> {
         self.mute_all(state)
     }
 
+    pub fn refresh_state(&mut self) -> Result<bool> {
+        let muted = self.is_muted_all()?;
+        let changed = self.muted != muted;
+        self.muted = muted;
+        Ok(changed)
+    }
+
     pub fn should_enforce_mute(&self) -> bool {
         self.desired_muted
     }
@@ -1037,6 +1044,20 @@ mod tests {
 
         assert!(controller.muted);
         assert!(controller.should_enforce_mute());
+    }
+
+    #[test]
+    fn refresh_state_tracks_external_native_mute_change() {
+        let backend = FakeBackend::with_devices(vec![(1, Device::native("Built-in", false))]);
+        let mut controller = MicController::with_backend(backend).unwrap();
+        assert!(!controller.muted);
+        assert!(!controller.should_enforce_mute());
+
+        controller.backend.device_mut(1).unwrap().mute = Some(true);
+
+        assert!(controller.refresh_state().unwrap());
+        assert!(controller.muted);
+        assert!(!controller.should_enforce_mute());
     }
 
     #[test]
