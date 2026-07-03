@@ -1,6 +1,9 @@
 use crate::settings::ShortcutConfig;
+use cocoa::base::{id, nil};
+use cocoa::foundation::NSString;
 use libc::c_void;
 use std::sync::{Arc, RwLock};
+use tao::window::Theme;
 
 type CGFloat = f64;
 
@@ -32,6 +35,25 @@ pub fn get_cursor_pos() -> Option<(f64, f64)> {
 pub fn arc_lock<T>(value: T) -> Arc<RwLock<T>> {
     let rwlock = RwLock::new(value);
     Arc::new(rwlock)
+}
+
+/// The OS-level appearance, read from user defaults rather than a window's
+/// effective theme. The menu bar always follows the OS setting even when an
+/// NSApp appearance override is active, so the tray icon color must come
+/// from here.
+pub fn system_theme() -> Theme {
+    unsafe {
+        let defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let key = NSString::alloc(nil).init_str("AppleInterfaceStyle");
+        // "Dark" when dark mode is on; absent in light mode.
+        let style: id = msg_send![defaults, stringForKey: key];
+        let _: () = msg_send![key, release];
+        if style == nil {
+            Theme::Light
+        } else {
+            Theme::Dark
+        }
+    }
 }
 
 /// Render a `ShortcutConfig` as a single string like `⇧⌘A`.

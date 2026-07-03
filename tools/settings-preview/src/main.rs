@@ -38,9 +38,17 @@ pub mod settings {
         fn default() -> Self {
             Self {
                 modifiers: vec!["shift".to_string(), "meta".to_string()],
-                key: "A".to_string(),
+                key: "M".to_string(),
             }
         }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum ThemePreference {
+        #[default]
+        System,
+        Light,
+        Dark,
     }
 
     #[derive(Debug, Clone)]
@@ -48,6 +56,7 @@ pub mod settings {
         pub mic_shortcut: ShortcutConfig,
         pub launch_at_login: bool,
         pub popup_duration_ms: u64,
+        pub theme: ThemePreference,
     }
 
     impl Default for Settings {
@@ -56,6 +65,7 @@ pub mod settings {
                 mic_shortcut: ShortcutConfig::default(),
                 launch_at_login: false,
                 popup_duration_ms: 1000,
+                theme: ThemePreference::default(),
             }
         }
     }

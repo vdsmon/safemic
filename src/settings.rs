@@ -13,7 +13,7 @@ impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
             modifiers: vec!["shift".to_string(), "meta".to_string()],
-            key: "A".to_string(),
+            key: "M".to_string(),
         }
     }
 }
@@ -22,16 +22,30 @@ fn default_popup_duration_ms() -> u64 {
     1000
 }
 
+/// App appearance override. `System` clears the override so windows follow
+/// the OS setting. The menu bar ignores app-level appearance, so the tray
+/// icon keys off the OS theme regardless of this preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub mic_shortcut: ShortcutConfig,
     #[serde(default)]
     pub launch_at_login: bool,
-    /// How long the on-screen popup pill stays visible after a mute/unmute event.
-    /// 0 hides the popup entirely; the menu bar icon still updates.
+    /// How long the on-screen popup bezel stays visible after a mute/unmute
+    /// event. 0 hides the popup entirely; the menu bar icon still updates.
     #[serde(default = "default_popup_duration_ms")]
     pub popup_duration_ms: u64,
+    #[serde(default)]
+    pub theme: ThemePreference,
 }
 
 impl Default for Settings {
@@ -40,6 +54,7 @@ impl Default for Settings {
             mic_shortcut: ShortcutConfig::default(),
             launch_at_login: false,
             popup_duration_ms: default_popup_duration_ms(),
+            theme: ThemePreference::default(),
         }
     }
 }
@@ -85,7 +100,7 @@ mod tests {
     #[test]
     fn test_default_shortcut() {
         let sc = ShortcutConfig::default();
-        assert_eq!(sc.key, "A");
+        assert_eq!(sc.key, "M");
         assert!(sc.modifiers.contains(&"shift".to_string()));
         assert!(sc.modifiers.contains(&"meta".to_string()));
     }
@@ -96,7 +111,7 @@ mod tests {
 
         let json = serde_json::to_string(&s).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.mic_shortcut.key, "A");
+        assert_eq!(loaded.mic_shortcut.key, "M");
     }
 
     #[test]
@@ -131,6 +146,7 @@ mod tests {
             },
             launch_at_login: false,
             popup_duration_ms: 1000,
+            theme: ThemePreference::default(),
         };
 
         let json = serde_json::to_string_pretty(&s).unwrap();
@@ -162,5 +178,21 @@ mod tests {
         let json = serde_json::to_string(&loaded).unwrap();
         let round: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(round.popup_duration_ms, 0);
+    }
+
+    #[test]
+    fn test_settings_json_missing_theme_defaults_to_system() {
+        let loaded: Settings = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(loaded.theme, ThemePreference::System);
+    }
+
+    #[test]
+    fn test_settings_json_theme_round_trip() {
+        let loaded: Settings = serde_json::from_str(r#"{"theme": "dark"}"#).unwrap();
+        assert_eq!(loaded.theme, ThemePreference::Dark);
+        let json = serde_json::to_string(&loaded).unwrap();
+        assert!(json.contains(r#""theme":"dark""#));
+        let round: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(round.theme, ThemePreference::Dark);
     }
 }

@@ -1,11 +1,11 @@
 /// Standalone preferences window. Ventura-style grouped form: one rounded
-/// card (NSBox) with three hairline-separated rows, label left / control
+/// card (NSBox) with four hairline-separated rows, label left / control
 /// right, following the system appearance. Auto-apply semantics — no
 /// Save/Cancel; every control change persists + fires
 /// `Message::ApplySettings`. Success is silent; a single footer line under
 /// the card carries transient text (recording help, conflicts, save errors).
 use crate::event_loop::{EventLoopMessage, EventLoopProxyMessage, Message};
-use crate::settings::{Settings, ShortcutConfig};
+use crate::settings::{Settings, ShortcutConfig, ThemePreference};
 use crate::shortcuts::validate_shortcut;
 use crate::utils::format_shortcut;
 
@@ -34,7 +34,7 @@ const NS_FONT_WEIGHT_MEDIUM: f64 = 0.23;
 const NS_FONT_WEIGHT_REGULAR: f64 = 0.0;
 const NS_BOX_CUSTOM: u64 = 4;
 
-const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(440.0, 180.0);
+const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(440.0, 220.0);
 const ERROR_HOLD_SECS: f64 = 1.5;
 const WARNING_HOLD_SECS: f64 = 3.0;
 const RECORDING_PLACEHOLDER: &str = "Recording\u{2026}";
@@ -47,6 +47,7 @@ struct ActionContext {
     launch_at_login_btn: id,
     popup_ms_field: id,
     popup_stepper: id,
+    theme_popup: id,
     shortcut_chip: id,
     shortcut_label: id,
     record_btn: id,
@@ -64,6 +65,7 @@ pub struct SettingsWindow {
     launch_at_login_btn: id,
     popup_ms_field: id,
     popup_stepper: id,
+    theme_popup: id,
     shortcut_label: id,
     shortcut_chip: id,
     record_btn: id,
@@ -96,6 +98,7 @@ impl SettingsWindow {
             launch_at_login_btn: b.launch_at_login_btn,
             popup_ms_field: b.popup_ms_field,
             popup_stepper: b.popup_stepper,
+            theme_popup: b.theme_popup,
             shortcut_label: b.shortcut_label,
             shortcut_chip: b.shortcut_chip,
             record_btn: b.record_btn,
@@ -121,6 +124,7 @@ impl SettingsWindow {
             launch_at_login_btn: self.launch_at_login_btn,
             popup_ms_field: self.popup_ms_field,
             popup_stepper: self.popup_stepper,
+            theme_popup: self.theme_popup,
             shortcut_chip: self.shortcut_chip,
             shortcut_label: self.shortcut_label,
             record_btn: self.record_btn,
@@ -141,6 +145,8 @@ impl SettingsWindow {
             let _: () = msg_send![self.launch_at_login_btn, setAction: sel!(launchAtLoginToggled:)];
             let _: () = msg_send![self.popup_stepper, setTarget: target];
             let _: () = msg_send![self.popup_stepper, setAction: sel!(stepperChanged:)];
+            let _: () = msg_send![self.theme_popup, setTarget: target];
+            let _: () = msg_send![self.theme_popup, setAction: sel!(themeChanged:)];
             let _: () = msg_send![self.escape_btn, setTarget: target];
             let _: () = msg_send![self.escape_btn, setAction: sel!(closeSettings:)];
             let _: () = msg_send![self.record_btn, setTarget: target];
@@ -191,6 +197,7 @@ impl SettingsWindow {
                 self.popup_ms_field,
                 &format_seconds(settings.popup_duration_ms),
             );
+            let _: () = msg_send![self.theme_popup, selectItemAtIndex: theme_index(settings.theme)];
             // Leave the chip alone while a recording is in flight: a debounced
             // popup-duration commit can land here via ApplySettings and would
             // otherwise replace the "Recording…" placeholder mid-capture.
@@ -335,6 +342,30 @@ extern "C" fn stepper_changed(this: &Object, _cmd: Sel, _sender: *mut Object) {
     persist(this, ctx, None, |store| store.popup_duration_ms = ms);
 }
 
+extern "C" fn theme_changed(this: &Object, _cmd: Sel, _sender: *mut Object) {
+    let ctx = unsafe { ctx_from(this) };
+    let index: i64 = unsafe { msg_send![ctx.theme_popup, indexOfSelectedItem] };
+    let theme = theme_from_index(index);
+    persist(this, ctx, None, |s| s.theme = theme);
+}
+
+/// Popup-menu item order; must match `make_theme_popup`'s titles.
+fn theme_index(theme: ThemePreference) -> i64 {
+    match theme {
+        ThemePreference::System => 0,
+        ThemePreference::Light => 1,
+        ThemePreference::Dark => 2,
+    }
+}
+
+fn theme_from_index(index: i64) -> ThemePreference {
+    match index {
+        1 => ThemePreference::Light,
+        2 => ThemePreference::Dark,
+        _ => ThemePreference::System,
+    }
+}
+
 /// Snap a seconds value to the 0.1s grid the UI edits in.
 fn quantize_seconds_to_ms(seconds: f64) -> u64 {
     ((seconds * 10.0).round() as u64) * 100
@@ -357,7 +388,25 @@ fn format_seconds(ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_seconds, quantize_seconds_to_ms};
+    use super::{format_seconds, quantize_seconds_to_ms, theme_from_index, theme_index};
+    use crate::settings::ThemePreference;
+
+    #[test]
+    fn test_theme_index_round_trips() {
+        for theme in [
+            ThemePreference::System,
+            ThemePreference::Light,
+            ThemePreference::Dark,
+        ] {
+            assert_eq!(theme_from_index(theme_index(theme)), theme);
+        }
+    }
+
+    #[test]
+    fn test_theme_from_unknown_index_falls_back_to_system() {
+        assert_eq!(theme_from_index(-1), ThemePreference::System);
+        assert_eq!(theme_from_index(99), ThemePreference::System);
+    }
 
     #[test]
     fn test_format_seconds_round_trips_ms_values() {
@@ -525,6 +574,10 @@ fn actions_class() -> &'static Class {
             decl.add_method(
                 sel!(stepperChanged:),
                 stepper_changed as extern "C" fn(&Object, Sel, *mut Object),
+            );
+            decl.add_method(
+                sel!(themeChanged:),
+                theme_changed as extern "C" fn(&Object, Sel, *mut Object),
             );
             decl.add_method(
                 sel!(closeSettings:),
@@ -701,6 +754,7 @@ struct BuiltViews {
     launch_at_login_btn: id,
     popup_ms_field: id,
     popup_stepper: id,
+    theme_popup: id,
     shortcut_label: id,
     shortcut_chip: id,
     record_btn: id,
@@ -714,7 +768,7 @@ const SIDE_PAD: f64 = 20.0;
 const TOP_PAD: f64 = 18.0;
 /// Height of one grouped-card row.
 const ROW_H: f64 = 40.0;
-const ROW_COUNT: f64 = 3.0;
+const ROW_COUNT: f64 = 4.0;
 const CARD_W: f64 = WINDOW_SIZE.width - 2.0 * SIDE_PAD;
 const CARD_H: f64 = ROW_H * ROW_COUNT;
 const CARD_RADIUS: f64 = 10.0;
@@ -748,14 +802,30 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
     let row_bottom = |index: f64| CARD_H - ROW_H * (index + 1.0);
 
     // Hairline separators between rows.
-    for i in 0..2 {
+    for i in 0..3 {
         let sep = make_separator(ROW_INSET, row_bottom(i as f64), CARD_W - ROW_INSET);
         add(card_cv, sep);
     }
 
-    // row 1: Mute shortcut
-    place_row_label(card_cv, "Mute shortcut", row_bottom(0.0));
-    let chip_y = vcenter_in_row(row_bottom(0.0), CHIP_H);
+    // row 1: Appearance — System / Light / Dark popup button
+    place_row_label(card_cv, "Appearance", row_bottom(0.0));
+    let theme_popup = make_theme_popup();
+    let _: () = msg_send![theme_popup, sizeToFit];
+    let pf: NSRect = msg_send![theme_popup, frame];
+    add(
+        card_cv,
+        place(
+            theme_popup,
+            CARD_W - CONTROL_INSET - pf.size.width,
+            vcenter_in_row(row_bottom(0.0), pf.size.height),
+            pf.size.width,
+            pf.size.height,
+        ),
+    );
+
+    // row 2: Mute shortcut
+    place_row_label(card_cv, "Mute shortcut", row_bottom(1.0));
+    let chip_y = vcenter_in_row(row_bottom(1.0), CHIP_H);
     let chip_x = CARD_W - CONTROL_INSET - CHIP_MIN_W;
     let shortcut_label = make_chip_label();
     let shortcut_chip = make_chip_box(chip_x, chip_y, CHIP_MIN_W, CHIP_H);
@@ -768,8 +838,8 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(record_btn, chip_x, chip_y, CHIP_MIN_W, CHIP_H),
     );
 
-    // row 2: Launch at login
-    place_row_label(card_cv, "Launch at login", row_bottom(1.0));
+    // row 3: Launch at login
+    place_row_label(card_cv, "Launch at login", row_bottom(2.0));
     // NSSwitch draws at its natural size centered in whatever frame it gets,
     // so a hardcoded frame width misaligns its visual right edge. Size to
     // fit and pin the fitted frame's right edge to the control column.
@@ -781,14 +851,14 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             launch_at_login_btn,
             CARD_W - CONTROL_INSET - sw.size.width,
-            vcenter_in_row(row_bottom(1.0), sw.size.height),
+            vcenter_in_row(row_bottom(2.0), sw.size.height),
             sw.size.width,
             sw.size.height,
         ),
     );
 
-    // row 3: Popup duration — [field][stepper] s
-    place_row_label(card_cv, "Popup duration", row_bottom(2.0));
+    // row 4: Popup duration — [field][stepper] s
+    place_row_label(card_cv, "Popup duration", row_bottom(3.0));
     let unit = make_unit_label("s");
     let _: () = msg_send![unit, sizeToFit];
     let unit_frame: NSRect = msg_send![unit, frame];
@@ -798,7 +868,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         card_cv,
         unit,
         unit_x,
-        vcenter_in_row(row_bottom(2.0), unit_frame.size.height),
+        vcenter_in_row(row_bottom(3.0), unit_frame.size.height),
     );
     let popup_stepper = make_stepper();
     let stepper_x = unit_x - 6.0 - STEPPER_W;
@@ -807,7 +877,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             popup_stepper,
             stepper_x,
-            vcenter_in_row(row_bottom(2.0), STEPPER_H),
+            vcenter_in_row(row_bottom(3.0), STEPPER_H),
             STEPPER_W,
             STEPPER_H,
         ),
@@ -818,7 +888,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             popup_ms_field,
             stepper_x - 4.0 - FIELD_W,
-            vcenter_in_row(row_bottom(2.0), FIELD_H),
+            vcenter_in_row(row_bottom(3.0), FIELD_H),
             FIELD_W,
             FIELD_H,
         ),
@@ -845,6 +915,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         launch_at_login_btn,
         popup_ms_field,
         popup_stepper,
+        theme_popup,
         shortcut_label,
         shortcut_chip,
         record_btn,
@@ -1060,6 +1131,19 @@ unsafe fn make_bare_label() -> id {
 unsafe fn make_switch() -> id {
     let sw: id = msg_send![class!(NSSwitch), alloc];
     msg_send![sw, init]
+}
+
+/// Item order must match `theme_index` / `theme_from_index`.
+unsafe fn make_theme_popup() -> id {
+    let popup: id = msg_send![class!(NSPopUpButton), alloc];
+    let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, 25.0));
+    let popup: id = msg_send![popup, initWithFrame: frame pullsDown: NO];
+    for title in ["System", "Light", "Dark"] {
+        let t = NSString::alloc(nil).init_str(title);
+        let _: () = msg_send![popup, addItemWithTitle: t];
+        let _: () = msg_send![t, release];
+    }
+    popup
 }
 
 unsafe fn make_stepper() -> id {
