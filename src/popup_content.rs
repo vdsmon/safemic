@@ -15,7 +15,7 @@ const UNMUTED_SYMBOL: &str = "mic.fill";
 /// Square bezel, volume-OSD style at a slightly more discreet scale.
 pub const BEZEL_SIZE: f64 = 150.0;
 const CORNER_RADIUS: f64 = 22.0;
-const SYMBOL_POINT_SIZE: f64 = 69.0;
+const SYMBOL_POINT_SIZE: f64 = 62.0;
 /// Frame the glyph renders into; symbols are wider than tall, so give the
 /// image view generous square bounds and let AppKit center the glyph.
 const ICON_FRAME: f64 = 104.0;
