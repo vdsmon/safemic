@@ -7,27 +7,6 @@ pub struct IconColor {
     pub b: u8,
 }
 
-pub fn popup_icon_color(muted: bool, theme: Theme) -> IconColor {
-    match theme {
-        Theme::Light if muted => IconColor {
-            r: 239,
-            g: 68,
-            b: 68,
-        }, // #ef4444
-        Theme::Light => IconColor { r: 0, g: 0, b: 0 },
-        Theme::Dark if muted => IconColor {
-            r: 248,
-            g: 113,
-            b: 113,
-        }, // #f87171
-        _ => IconColor {
-            r: 255,
-            g: 255,
-            b: 255,
-        },
-    }
-}
-
 pub fn tray_icon_color(muted: bool, theme: Theme) -> IconColor {
     match theme {
         Theme::Light if muted => IconColor {

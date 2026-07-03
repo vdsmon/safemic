@@ -154,6 +154,21 @@ impl Shortcuts {
         })
     }
 
+    /// Temporarily unregister the hotkey so the shortcut recorder can capture
+    /// the currently-assigned combo (a registered hotkey consumes it before
+    /// any NSView sees the keyDown). Idempotent.
+    pub fn suspend(&mut self) {
+        let _ = self.hotkeys_manager.unregister(self.mic_hotkey);
+    }
+
+    /// Re-register after `suspend`. A subsequent `reload` handles the case
+    /// where the shortcut changed while suspended.
+    pub fn resume(&mut self) -> Result<()> {
+        self.hotkeys_manager
+            .register(self.mic_hotkey)
+            .context("Failed to re-register mic hotkey")
+    }
+
     /// Unregister the current hotkeys and register new ones from updated settings.
     pub fn reload(&mut self, settings: &Settings) -> Result<()> {
         let _ = self.hotkeys_manager.unregister(self.mic_hotkey);

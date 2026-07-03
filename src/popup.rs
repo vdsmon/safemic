@@ -4,8 +4,8 @@ use crate::utils::get_cursor_pos;
 use anyhow::{Context, Result};
 use async_std::task;
 use cocoa::{
-    appkit::{NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility},
-    base::{id, YES},
+    appkit::{NSView, NSWindow},
+    base::{id, NO},
 };
 use log::trace;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,19 +46,11 @@ fn monitor_contains_physical_position(
 fn setup_window(window: id) {
     unsafe {
         window.setHasShadow_(true);
-        // Rounded edges hack: https://stackoverflow.com/a/37418915
-        let mask = window.styleMask();
-        let _: () = msg_send![
-            window,
-            setStyleMask: mask
-                | NSWindowStyleMask::NSTitledWindowMask
-                | NSWindowStyleMask::NSFullSizeContentViewWindowMask
-        ];
-        let _: () = msg_send![
-            window,
-            setTitleVisibility: NSWindowTitleVisibility::NSWindowTitleHidden
-        ];
-        let _: () = msg_send![window, setTitlebarAppearsTransparent: YES];
+        // Transparent window; the rounded bezel shape comes from the
+        // vibrancy content view's masked layer.
+        let clear: id = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![window, setOpaque: NO];
+        let _: () = msg_send![window, setBackgroundColor: clear];
     };
 }
 
@@ -66,7 +58,7 @@ pub struct Popup {
     window: Window,
     content: PopupContent,
     current_monitor: Option<MonitorHandle>,
-    /// How long the popup pill stays visible after a mute/unmute event.
+    /// How long the popup bezel stays visible after a mute/unmute event.
     /// 0 = never show.
     popup_duration_ms: u64,
     /// Bumped on every show/hide. Pending `schedule_hide` timers capture the
@@ -97,7 +89,9 @@ impl Popup {
             .with_movable_by_window_background(true)
             .with_always_on_top(true)
             .with_closable(false)
-            .with_content_protection(true)
+            // Protected in release so the popup never appears in screen
+            // shares; debug builds stay capturable for visual QA tooling.
+            .with_content_protection(!cfg!(debug_assertions))
             .with_decorations(false)
             .with_inner_size(size)
             .with_maximized(false)
@@ -116,7 +110,7 @@ impl Popup {
         window.set_ignore_cursor_events(true)?;
 
         trace!("Window scale factor {}", scale);
-        let content = PopupContent::new(mic_muted, size, window.theme())?;
+        let content = PopupContent::new(mic_muted, size)?;
         unsafe {
             let ns_view = window.ns_view() as id;
             ns_view.addSubview_(content.view);
@@ -178,9 +172,10 @@ impl Popup {
     }
 
     fn get_size() -> WindowSize {
-        // sized to fit the longest possible label ("Microphone off" / "Microphone on") plus
-        // icon + padding so the pill hugs its content
-        LogicalSize::new(crate::popup_content::max_pill_width(), 40.0)
+        LogicalSize::new(
+            crate::popup_content::BEZEL_SIZE,
+            crate::popup_content::BEZEL_SIZE,
+        )
     }
 
     pub fn get_theme(&self) -> Theme {
@@ -194,8 +189,7 @@ impl Popup {
     ) -> Result<&mut Self> {
         self.window.set_title(get_mute_title_text(mic_muted));
         self.update_placement()?;
-        self.content
-            .update(mic_muted, self.get_theme(), active_device_name)?;
+        self.content.update(mic_muted, active_device_name)?;
         let mic_changed = self.last_mic_muted != Some(mic_muted);
         self.last_mic_muted = Some(mic_muted);
         trace!(
@@ -349,11 +343,15 @@ impl Popup {
     }
 
     fn get_position(monitor: &MonitorHandle, window_size: WindowSize) -> LogicalPosition<f64> {
+        // System-bezel placement: horizontally centered above the bottom
+        // edge. 110pt is a calibrated middle ground: the native OSD uses
+        // 140pt, but with our smaller 150pt bezel that read too high.
+        const BOTTOM_GAP: f64 = 110.0;
         let scale = monitor.scale_factor();
         let monitor_position = monitor.position().to_logical::<f64>(scale);
         let monitor_size = monitor.size().to_logical::<f64>(scale);
         let x: f64 = (monitor_position.x + (monitor_size.width / 2.)) - (window_size.width / 2.);
-        let y: f64 = (monitor_position.y + monitor_size.height) - (window_size.height * 2.);
+        let y: f64 = (monitor_position.y + monitor_size.height) - window_size.height - BOTTOM_GAP;
         LogicalPosition::new(x, y)
     }
 }

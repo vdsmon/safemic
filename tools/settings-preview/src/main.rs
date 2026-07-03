@@ -81,6 +81,9 @@ pub mod event_loop {
             previous_shortcut: Option<ShortcutConfig>,
         },
         CloseSettings,
+        SuspendHotkey {
+            suspended: bool,
+        },
         // Sidecar-only: trigger the snapshot timeline once the window has
         // settled / animations have run.
         Snapshot,
@@ -162,13 +165,26 @@ fn main() -> Result<()> {
 
     // Snapshot mode: drive the window into `SAFEMIC_PREVIEW_STATE`, wait one
     // event-loop tick + the requested settle delay, snapshot to
-    // `SAFEMIC_PREVIEW_SNAPSHOT`, then exit. iterate.sh loops over states.
+    // `SAFEMIC_PREVIEW_SNAPSHOT`, then exit. iterate.sh loops over
+    // state × appearance.
     let snapshot_path = std::env::var("SAFEMIC_PREVIEW_SNAPSHOT").ok();
     let state = std::env::var("SAFEMIC_PREVIEW_STATE").unwrap_or_default();
     let settle_ms: u64 = std::env::var("SAFEMIC_PREVIEW_SETTLE_MS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(220);
+
+    // The window follows the system appearance; captures must be
+    // deterministic, so the sidecar pins one explicitly.
+    let appearance = std::env::var("SAFEMIC_PREVIEW_APPEARANCE").unwrap_or_default();
+    match appearance.as_str() {
+        "light" => window.set_preview_appearance("NSAppearanceNameAqua"),
+        "" | "dark" => window.set_preview_appearance("NSAppearanceNameDarkAqua"),
+        other => {
+            log::error!("unknown SAFEMIC_PREVIEW_APPEARANCE: {other}");
+            std::process::exit(1);
+        }
+    }
 
     if !state.is_empty() {
         window.preview_state(&state);

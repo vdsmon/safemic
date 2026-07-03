@@ -1,21 +1,27 @@
 #!/bin/bash
 # Fast About-window iteration loop.
 #
-# Launches the sidecar, captures an in-process PNG via
-# bitmapImageRepForCachingDisplayInRect (no Screen Recording grant), resizes to
-# the target dimensions, then computes structural dissimilarity against the
-# design target via `magick compare -metric SSIM`.
+# For each appearance (dark/light), launches the sidecar, captures an
+# in-process PNG via bitmapImageRepForCachingDisplayInRect (no Screen
+# Recording grant), resizes to the target dimensions, then computes
+# structural dissimilarity against the accepted-design target via
+# `magick compare -metric SSIM`.
+#
+# Since the 2026-07 native redesign this gate is SELF-REGRESSION, not
+# mock-conformance: targets are captures of the accepted build, refreshed
+# with --update after intentional design changes.
 #
 # Usage:
-#   tools/about-preview/iterate.sh
+#   tools/about-preview/iterate.sh            # capture + compare both appearances
+#   tools/about-preview/iterate.sh --update   # capture + overwrite targets
 #
 # Env overrides:
 #   ABOUT_DISSIM_THRESHOLD    default 0.04 (lower = stricter; 0 = identical)
 #   SAFEMIC_PREVIEW_SETTLE_MS default 220
 #
 # Outputs:
-#   /tmp/safemic-about-snap/about.png          raw window snapshot
-#   /tmp/safemic-about-snap/about-resized.png  resized to target dims
+#   /tmp/safemic-about-snap/about-<appearance>.png          raw window snapshots
+#   /tmp/safemic-about-snap/about-<appearance>-resized.png  resized to target dims
 #
 # Metric semantics:
 #   ImageMagick 7's `compare -metric SSIM` emits structural DISSIMILARITY
@@ -24,7 +30,7 @@
 #   keep magick's value as `dissim`, also publish a derived `similarity` for
 #   readability where 1.0 = identical.
 #
-# Exit codes: 0 ACCEPT (dissim <= threshold), 1 setup failure, 3 REJECT.
+# Exit codes: 0 ACCEPT (all dissim <= threshold), 1 setup failure, 3 REJECT.
 set -e
 
 # Derive repo/worktree root from script location. Works in both main checkout
@@ -37,29 +43,25 @@ if [ -d "$ROOT/.git" ] || [ -f "$ROOT/.git" ]; then
 fi
 
 BIN="$ROOT/target/aarch64-apple-darwin/debug/about-preview"
-OUT="/tmp/safemic-about-snap"
-TARGET="/Users/victordsm/.claude/loop-finder/60bc3b8f2621/target.png"
+# Overridable so sandboxed agent runs can point at a writable tmp dir.
+OUT="${SAFEMIC_SNAP_DIR:-/tmp/safemic-about-snap}"
+TARGET_DIR="${ABOUT_TARGET_DIR:-$HOME/.claude/loop-finder/60bc3b8f2621}"
 THRESHOLD="${ABOUT_DISSIM_THRESHOLD:-0.04}"
 SETTLE_MS="${SAFEMIC_PREVIEW_SETTLE_MS:-220}"
+APPEARANCES=(dark light)
 
-mkdir -p "$OUT"
+UPDATE=0
+for arg in "$@"; do
+  case "$arg" in
+    --update) UPDATE=1 ;;
+    *) echo "unknown arg: $arg" >&2; exit 2 ;;
+  esac
+done
+
+mkdir -p "$OUT" "$TARGET_DIR"
 ( cd "$ROOT" && cargo build -p about-preview --target aarch64-apple-darwin 2>&1 ) | tail -3
 
 pkill -f "target/aarch64-apple-darwin/debug/about-preview" 2>/dev/null || true
-
-out="$OUT/about.png"
-if ! SAFEMIC_PREVIEW_SNAPSHOT="$out" SAFEMIC_PREVIEW_SETTLE_MS="$SETTLE_MS" "$BIN" >/dev/null 2>&1; then
-  echo "FAIL: about-preview did not produce $out" >&2
-  exit 1
-fi
-if [ ! -s "$out" ]; then
-  echo "FAIL: $out empty or missing" >&2
-  exit 1
-fi
-
-TARGET_W=$(magick identify -format "%w" "$TARGET")
-TARGET_H=$(magick identify -format "%h" "$TARGET")
-magick "$out" -resize "${TARGET_W}x${TARGET_H}!" "$OUT/about-resized.png"
 
 extract_dissim() {
   local raw="$1"
@@ -69,54 +71,45 @@ extract_dissim() {
   echo "$d"
 }
 
-RAW=$(magick compare -metric SSIM "$TARGET" "$OUT/about-resized.png" NULL: 2>&1 | tr -d '\n')
-DISSIM=$(extract_dissim "$RAW")
-SIMILARITY=$(awk -v d="$DISSIM" 'BEGIN {printf "%.4f", 1.0 - 2.0 * d}')
+fail=0
+for appearance in "${APPEARANCES[@]}"; do
+  out="$OUT/about-$appearance.png"
+  if ! SAFEMIC_PREVIEW_SNAPSHOT="$out" \
+       SAFEMIC_PREVIEW_APPEARANCE="$appearance" \
+       SAFEMIC_PREVIEW_SETTLE_MS="$SETTLE_MS" "$BIN" >/dev/null 2>&1; then
+    echo "FAIL: about-preview ($appearance) did not produce $out" >&2
+    exit 1
+  fi
+  if [ ! -s "$out" ]; then
+    echo "FAIL: $out empty or missing" >&2
+    exit 1
+  fi
 
-# G2: per-quadrant dissim emission. Split target + resized render into 4 quadrants
-# (top-left, top-right, bottom-left, bottom-right) so the next product-iteration
-# cycle gets spatial signal on WHERE the design differs, not just an opaque scalar.
-TW=$(magick identify -format "%w" "$TARGET")
-TH=$(magick identify -format "%h" "$TARGET")
-HW=$((TW / 2))
-HH=$((TH / 2))
+  target="$TARGET_DIR/target-$appearance.png"
+  if [ "$UPDATE" = 1 ] || [ ! -f "$target" ]; then
+    cp "$out" "$target"
+    echo "target written: $target"
+    continue
+  fi
 
-magick "$TARGET" -crop "${HW}x${HH}+0+0" +repage "$OUT/target-q1.png"
-magick "$TARGET" -crop "${HW}x${HH}+${HW}+0" +repage "$OUT/target-q2.png"
-magick "$TARGET" -crop "${HW}x${HH}+0+${HH}" +repage "$OUT/target-q3.png"
-magick "$TARGET" -crop "${HW}x${HH}+${HW}+${HH}" +repage "$OUT/target-q4.png"
+  TARGET_W=$(magick identify -format "%w" "$target")
+  TARGET_H=$(magick identify -format "%h" "$target")
+  magick "$out" -resize "${TARGET_W}x${TARGET_H}!" "$OUT/about-$appearance-resized.png"
 
-magick "$OUT/about-resized.png" -crop "${HW}x${HH}+0+0" +repage "$OUT/about-q1.png"
-magick "$OUT/about-resized.png" -crop "${HW}x${HH}+${HW}+0" +repage "$OUT/about-q2.png"
-magick "$OUT/about-resized.png" -crop "${HW}x${HH}+0+${HH}" +repage "$OUT/about-q3.png"
-magick "$OUT/about-resized.png" -crop "${HW}x${HH}+${HW}+${HH}" +repage "$OUT/about-q4.png"
+  RAW=$(magick compare -metric SSIM "$target" "$OUT/about-$appearance-resized.png" NULL: 2>&1 | tr -d '\n')
+  DISSIM=$(extract_dissim "$RAW")
+  SIMILARITY=$(awk -v d="$DISSIM" 'BEGIN {printf "%.4f", 1.0 - 2.0 * d}')
+  echo "$appearance: dissim: $DISSIM similarity: $SIMILARITY threshold: $THRESHOLD path: $out (raw: $RAW)"
 
-Q1=$(extract_dissim "$(magick compare -metric SSIM "$OUT/target-q1.png" "$OUT/about-q1.png" NULL: 2>&1 | tr -d '\n')")
-Q2=$(extract_dissim "$(magick compare -metric SSIM "$OUT/target-q2.png" "$OUT/about-q2.png" NULL: 2>&1 | tr -d '\n')")
-Q3=$(extract_dissim "$(magick compare -metric SSIM "$OUT/target-q3.png" "$OUT/about-q3.png" NULL: 2>&1 | tr -d '\n')")
-Q4=$(extract_dissim "$(magick compare -metric SSIM "$OUT/target-q4.png" "$OUT/about-q4.png" NULL: 2>&1 | tr -d '\n')")
+  if ! awk -v d="$DISSIM" -v t="$THRESHOLD" 'BEGIN {exit !(d <= t)}'; then
+    echo "REJECT ($appearance dissim $DISSIM > $THRESHOLD)"
+    fail=1
+  fi
+done
 
-WORST_Q=$(awk -v q1="$Q1" -v q2="$Q2" -v q3="$Q3" -v q4="$Q4" 'BEGIN {
-  n="q1"; v=q1+0;
-  if (q2+0 > v) { n="q2"; v=q2+0 }
-  if (q3+0 > v) { n="q3"; v=q3+0 }
-  if (q4+0 > v) { n="q4"; v=q4+0 }
-  printf "%s %s", n, v
-}')
-WORST_NAME=$(echo "$WORST_Q" | awk '{print $1}')
-WORST_VAL=$(echo "$WORST_Q" | awk '{print $2}')
-
-echo "dissim: $DISSIM similarity: $SIMILARITY threshold: $THRESHOLD path: $out (raw: $RAW)"
-echo "  q1 (top-left):     $Q1"
-echo "  q2 (top-right):    $Q2"
-echo "  q3 (bottom-left):  $Q3"
-echo "  q4 (bottom-right): $Q4"
-echo "worst_quadrant: $WORST_NAME dissim=$WORST_VAL"
-
-if awk -v d="$DISSIM" -v t="$THRESHOLD" 'BEGIN {exit !(d <= t)}'; then
+if [ "$fail" = 0 ]; then
   echo "ACCEPT"
   exit 0
 else
-  echo "REJECT (dissim $DISSIM > $THRESHOLD)"
   exit 3
 fi

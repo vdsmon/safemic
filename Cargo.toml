@@ -1,11 +1,16 @@
 [workspace]
-members = [".", "tools/settings-preview", "tools/about-preview"]
+members = [
+    ".",
+    "tools/settings-preview",
+    "tools/about-preview",
+    "tools/popup-preview",
+]
 resolver = "2"
 
 [package]
 name = "safemic"
 description = "System-wide microphone mute for macOS"
-version = "0.5.5"
+version = "0.6.0"
 edition = "2021"
 authors = ["Victor de Simone Oliveira <victorsmoliveira@gmail.com>"]
 license = "MIT"

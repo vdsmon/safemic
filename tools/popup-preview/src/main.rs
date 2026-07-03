@@ -1,47 +1,64 @@
-// Permit unused API in the included about.rs (some helpers are only called by
-// present_about_modal, which the sidecar deliberately does not invoke).
+// Permit unused API in the included popup_content.rs (some methods are only
+// called by the full safemic popup, not by the sidecar's main).
 #![allow(dead_code)]
 
-//! Standalone About-window iteration sidecar.
+//! Standalone Popup-bezel iteration sidecar.
 //!
-//! Hosts only `src/about.rs` plus a tiny snapshot harness. Changes to
-//! about.rs flow into this binary automatically (single source of truth).
-//!
-//! Run with `cargo run -p about-preview --target aarch64-apple-darwin` or
-//! via the wrapper at `tools/about-preview/iterate.sh` which captures + SSIM.
+//! Hosts only `src/popup_content.rs` plus a tiny snapshot harness. Changes to
+//! popup_content.rs flow into this binary automatically (single source of
+//! truth). Snapshots render in-process, so they need no Screen Recording
+//! grant and are unaffected by the release popup's content protection.
+//! Caveat: `cacheDisplayInRect:` renders the vibrancy material's tint plate
+//! without the live backdrop blur — good for layout/tint/radius regression,
+//! not for judging the blur itself.
 
 #[macro_use]
 extern crate objc;
 
 use anyhow::Result;
-use cocoa::base::{id, nil, YES};
-use cocoa::foundation::{NSRect, NSString};
+use cocoa::base::{id, nil, NO, YES};
+use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString};
 use log::info;
+use tao::dpi::LogicalSize;
 
-// Pull the real layout code in verbatim. include_bytes! paths in about.rs are
-// resolved relative to the original src/about.rs file, so the icon include
-// still works through the #[path] indirection.
-#[path = "../../../src/about.rs"]
-mod about;
+#[path = "../../../src/popup_content.rs"]
+mod popup_content;
+
+use popup_content::{PopupContent, BEZEL_SIZE};
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
 
-    // NSApplication needs to exist + be activated as a regular app before any
-    // window will show up on screen. tao normally handles this; the sidecar
-    // does it directly to keep the dep tree small.
+    let muted = match std::env::var("SAFEMIC_PREVIEW_STATE").as_deref() {
+        Ok("unmuted") => false,
+        Ok("muted") | Ok("") | Err(_) => true,
+        Ok(other) => {
+            log::error!("unknown SAFEMIC_PREVIEW_STATE: {other}");
+            std::process::exit(1);
+        }
+    };
+
     unsafe {
         let app: id = msg_send![class!(NSApplication), sharedApplication];
         // NSApplicationActivationPolicyRegular = 0
         let _: () = msg_send![app, setActivationPolicy: 0i64];
         let _: bool = msg_send![app, finishLaunching];
 
-        let aw = about::build_about_window();
+        let frame = NSRect::new(
+            NSPoint::new(400.0, 400.0),
+            NSSize::new(BEZEL_SIZE, BEZEL_SIZE),
+        );
+        let window: id = msg_send![class!(NSWindow), alloc];
+        // styleMask 0 = borderless, backing 2 = buffered
+        let window: id = msg_send![window, initWithContentRect: frame
+            styleMask: 0u64 backing: 2u64 defer: NO];
+        let _: () = msg_send![window, setReleasedWhenClosed: NO];
+        let clear: id = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![window, setOpaque: NO];
+        let _: () = msg_send![window, setBackgroundColor: clear];
 
-        // The window follows the system appearance; captures must be
-        // deterministic, so the sidecar pins one explicitly.
         let appearance = std::env::var("SAFEMIC_PREVIEW_APPEARANCE").unwrap_or_default();
         let appearance_name = match appearance.as_str() {
             "light" => "NSAppearanceNameAqua",
@@ -55,15 +72,13 @@ fn main() -> Result<()> {
         let ns_appearance: id = msg_send![class!(NSAppearance), appearanceNamed: ns_name];
         let _: () = msg_send![ns_name, release];
         if ns_appearance != nil {
-            let _: () = msg_send![aw.window, setAppearance: ns_appearance];
+            let _: () = msg_send![window, setAppearance: ns_appearance];
         }
 
-        let _: () = msg_send![aw.window, makeKeyAndOrderFront: nil];
+        let content = PopupContent::new(muted, LogicalSize::new(BEZEL_SIZE, BEZEL_SIZE))?;
+        let _: () = msg_send![window, setContentView: content.view];
+        let _: () = msg_send![window, makeKeyAndOrderFront: nil];
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
-        // Apply the target frame and full opacity directly (no animator —
-        // sidecar snapshots a static state, not the fade-in transition).
-        let _: () = msg_send![aw.window, setAlphaValue: 1.0_f64];
-        let _: () = msg_send![aw.window, setFrame: aw.target_frame display: YES];
 
         let settle_ms: u64 = std::env::var("SAFEMIC_PREVIEW_SETTLE_MS")
             .ok()
@@ -71,9 +86,8 @@ fn main() -> Result<()> {
             .unwrap_or(220);
         pump_run_loop_ms(settle_ms);
 
-        let snapshot_path = std::env::var("SAFEMIC_PREVIEW_SNAPSHOT").ok();
-        if let Some(path) = snapshot_path {
-            snapshot_window_to_png(aw.window, &path)?;
+        if let Ok(path) = std::env::var("SAFEMIC_PREVIEW_SNAPSHOT") {
+            snapshot_window_to_png(window, &path)?;
             info!("snapshot -> {path}");
         }
     }
@@ -81,9 +95,9 @@ fn main() -> Result<()> {
     std::process::exit(0);
 }
 
-/// Mirror of `SettingsWindow::snapshot_to_png` from src/settings_window.rs.
-/// Uses `bitmapImageRepForCachingDisplayInRect:` so no Screen Recording grant
-/// is required and the snapshot does not go through the window server.
+/// Mirror of the settings/about sidecar snapshot: renders the window's view
+/// tree via `bitmapImageRepForCachingDisplayInRect:` — no window server, no
+/// Screen Recording permission.
 unsafe fn snapshot_window_to_png(ns_window: id, path: &str) -> Result<()> {
     let content_view: id = msg_send![ns_window, contentView];
     if content_view == nil {

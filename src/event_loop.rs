@@ -48,6 +48,13 @@ pub enum Message {
         previous_shortcut: Option<ShortcutConfig>,
     },
     CloseSettings,
+    /// Unregister/re-register the global mute hotkey. Sent by the shortcut
+    /// recorder: while recording, a registered hotkey consumes its own combo
+    /// system-wide (RegisterEventHotKey swallows the key event), so pressing
+    /// the current shortcut would toggle mute instead of being captured.
+    SuspendHotkey {
+        suspended: bool,
+    },
 }
 
 pub type EventLoopMessage = EventLoop<Message>;
@@ -188,6 +195,10 @@ pub fn start(
             }
             Event::UserEvent(Message::CloseSettings) => {
                 ui.read().unwrap().close_settings_window();
+            }
+            Event::UserEvent(Message::SuspendHotkey { suspended }) => {
+                trace!("SuspendHotkey received: {}", suspended);
+                ui.write().unwrap().set_hotkey_suspended(suspended);
             }
             Event::WindowEvent {
                 window_id,
