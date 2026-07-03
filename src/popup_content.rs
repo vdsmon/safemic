@@ -12,13 +12,13 @@ const UNMUTED_DESCRIPTION: &str = "Microphone on";
 const MUTED_SYMBOL: &str = "mic.slash.fill";
 const UNMUTED_SYMBOL: &str = "mic.fill";
 
-/// Square bezel matching the macOS volume/brightness OSD footprint.
-pub const BEZEL_SIZE: f64 = 200.0;
-const CORNER_RADIUS: f64 = 28.0;
-const SYMBOL_POINT_SIZE: f64 = 80.0;
+/// Square bezel, volume-OSD style at a slightly more discreet scale.
+pub const BEZEL_SIZE: f64 = 150.0;
+const CORNER_RADIUS: f64 = 22.0;
+const SYMBOL_POINT_SIZE: f64 = 69.0;
 /// Frame the glyph renders into; symbols are wider than tall, so give the
 /// image view generous square bounds and let AppKit center the glyph.
-const ICON_FRAME: f64 = 120.0;
+const ICON_FRAME: f64 = 104.0;
 const NS_FONT_WEIGHT_REGULAR: f64 = 0.0;
 // NSVisualEffectView raw enum values.
 const MATERIAL_HUD_WINDOW: u64 = 13;
