@@ -1,5 +1,10 @@
 [workspace]
-members = [".", "tools/settings-preview", "tools/about-preview"]
+members = [
+    ".",
+    "tools/settings-preview",
+    "tools/about-preview",
+    "tools/popup-preview",
+]
 resolver = "2"
 
 [package]

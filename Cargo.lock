@@ -2466,6 +2466,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "popup-preview"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cocoa",
+ "env_logger",
+ "log",
+ "objc",
+ "tao",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

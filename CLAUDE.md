@@ -27,6 +27,7 @@ Single test: `cargo test --release <test_name>` (e.g. `cargo test --release test
 This repo has two pre-built self-verifiable visual gates produced by the `loop-finder` skill on 2026-05-27. Use them via the project-scoped `loops` skill (`.claude/skills/loops/`, auto-discovered by Claude Code), or invoke directly:
 
 - `tools/settings-preview/iterate.sh --diff` — settings-window snapshot regression vs `snapshots/settings/<state>-<dark|light>.png` (states: default, recording, warning, status_err). Exit 0 = match, 3 = drift.
+- `tools/popup-preview/iterate.sh --diff` — popup-bezel snapshot regression vs `snapshots/popup/<muted|unmuted>-<dark|light>.png`. In-process capture shows the vibrancy tint plate without live backdrop blur; covers layout/glyph/tint/radius only. Exit 0 = match, 3 = drift.
 - `tools/about-preview/iterate.sh` — about-window self-regression vs `~/.claude/loop-finder/60bc3b8f2621/target-<dark|light>.png` via `magick compare -metric SSIM`. **NOTE: emits DISSIMILARITY (0=identical) despite metric name; predicate is `dissim ≤ ABOUT_DISSIM_THRESHOLD` (default 0.04).** Since the 2026-07 native redesign the targets are captures of the accepted build, not a design mock.
 
 Update baselines after intentional UI changes: `tools/settings-preview/iterate.sh --update` (then `git add snapshots/settings/`) and `tools/about-preview/iterate.sh --update`. Both sidecars pin appearance per capture via `SAFEMIC_PREVIEW_APPEARANCE`; snapshot output dirs are overridable via `SAFEMIC_SNAP_DIR` (sandboxed runs). Sidecars need WindowServer access — run unsandboxed.

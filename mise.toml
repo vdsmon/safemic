@@ -20,7 +20,9 @@ env = { RUST_LOG = "info,safemic=trace" }
 # --no-vcs-ignore: git worktrees live under .claude/worktrees, which the main
 # repo's .gitignore covers, so watchexec would otherwise ignore every file and
 # never reload. Explicit -w paths keep target/ out of the watch set.
-run = "watchexec --poll 500ms --no-vcs-ignore -w src -w Cargo.toml -w Cargo.lock -e rs,toml -- cargo run"
+# -r: watchexec 2.x queues changes while the command is still running, so
+# without it a live `cargo run` is never restarted on source changes.
+run = "watchexec -r --poll 500ms --no-vcs-ignore -w src -w Cargo.toml -w Cargo.lock -e rs,toml -- cargo run"
 
 [tasks.check]
 description = "Clippy + fmt check (CI gate)"

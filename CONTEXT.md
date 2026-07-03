@@ -13,8 +13,8 @@ The control in Settings that displays the Mute shortcut and records a new one wh
 _Avoid_: well, recorder button
 
 **Popup**:
-The transient capsule that confirms the microphone state after a toggle, then auto-hides.
-_Avoid_: HUD, toast, notification, bezel
+The transient icon-only bezel (volume-OSD style) that confirms the microphone state after a toggle, then auto-hides.
+_Avoid_: HUD, toast, notification
 
 **Popup duration**:
 How long the Popup stays visible, in seconds with 0.1s resolution. 0 means the Popup never shows.

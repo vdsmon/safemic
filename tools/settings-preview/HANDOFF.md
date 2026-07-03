@@ -44,3 +44,4 @@ For pixel-level alignment auditing, scan pixel rows/columns with `magick <img> -
 2. `cargo test` — unit tests
 3. `tools/settings-preview/iterate.sh --diff` — exit 0
 4. `tools/about-preview/iterate.sh` — exit 0 (sibling gate, both appearances)
+5. `tools/popup-preview/iterate.sh --diff` — exit 0 (popup bezel gate)

@@ -1,0 +1,24 @@
+[package]
+name = "popup-preview"
+description = "Standalone Popup-bezel iteration sidecar for SafeMic. Hosts only the popup content code so visual tweaks rebuild fast and snapshot in-process (no Screen Recording grant, immune to the release build's content protection)."
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "popup-preview"
+path = "src/main.rs"
+
+[dependencies]
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+tao = "0.35"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.24"
+objc = "0.2"
+
+[lints.rust]
+unexpected_cfgs = "allow"
