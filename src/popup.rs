@@ -343,10 +343,10 @@ impl Popup {
     }
 
     fn get_position(monitor: &MonitorHandle, window_size: WindowSize) -> LogicalPosition<f64> {
-        // System-bezel placement: horizontally centered, bottom edge 140pt
-        // above the screen bottom — the native OSDUIHelper geometry (per
-        // open-source HUD recreations; not officially documented).
-        const BOTTOM_GAP: f64 = 140.0;
+        // System-bezel placement: horizontally centered above the bottom
+        // edge. 110pt is a calibrated middle ground: the native OSD uses
+        // 140pt, but with our smaller 150pt bezel that read too high.
+        const BOTTOM_GAP: f64 = 110.0;
         let scale = monitor.scale_factor();
         let monitor_position = monitor.position().to_logical::<f64>(scale);
         let monitor_size = monitor.size().to_logical::<f64>(scale);
