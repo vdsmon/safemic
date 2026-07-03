@@ -67,7 +67,7 @@ pub unsafe fn build_about_window() -> AboutWindow {
     let ox = sf.origin.x + (sf.size.width - WIN_W) / 2.0;
     let oy = sf.origin.y + (sf.size.height - WIN_H) / 2.0;
 
-    let window: id = msg_send![about_window_class(), alloc];
+    let window: id = msg_send![class!(NSWindow), alloc];
     let window: id = msg_send![window, initWithContentRect: rect(ox, oy - 6.0, WIN_W, WIN_H)
         styleMask: STYLE_TITLED_CLOSABLE backing: 2u64 defer: NO];
     // WIN_W×WIN_H is the CONTENT size; the frame is titlebar-taller. The
@@ -102,6 +102,9 @@ pub unsafe fn build_about_window() -> AboutWindow {
     let tgt: id = msg_send![actions_class(), alloc];
     let tgt: id = msg_send![tgt, init];
     (*tgt).set_ivar("_ctxPtr", ctx_ptr);
+    // Delegate intercepts every close path (stoplight button, Cmd-W) via
+    // windowShouldClose: — see window_should_close for why.
+    let _: () = msg_send![window, setDelegate: tgt];
 
     // Helper: convert "y measured from top of content" to bottom-up coords.
     let from_top = |y_top: f64, h: f64| -> f64 { ch - y_top - h };
@@ -320,30 +323,21 @@ fn actions_class() -> &'static Class {
                 sel!(openGitHubAction:),
                 open_github_action as extern "C" fn(&Object, Sel, *mut Object),
             );
-        }
-        decl.register()
-    })
-}
-
-/// The red titlebar close button runs `performClose:` on the window; during
-/// `runModalForWindow:` that would close the window without ending the modal
-/// session, so route it to `stopModal` instead. The window is ordered out
-/// after runModal returns.
-extern "C" fn perform_close(_: &Object, _: Sel, _sender: *mut Object) {
-    unsafe { stop_modal(0) }
-}
-
-fn about_window_class() -> &'static Class {
-    static CLS: OnceLock<&'static Class> = OnceLock::new();
-    CLS.get_or_init(|| {
-        let mut decl = ClassDecl::new("MMAboutWindow", class!(NSWindow))
-            .expect("MMAboutWindow registered twice");
-        unsafe {
             decl.add_method(
-                sel!(performClose:),
-                perform_close as extern "C" fn(&Object, Sel, *mut Object),
+                sel!(windowShouldClose:),
+                window_should_close as extern "C" fn(&Object, Sel, *mut Object) -> bool,
             );
         }
         decl.register()
     })
+}
+
+/// Closing the window during `runModalForWindow:` would leave the modal
+/// session spinning forever with no window on screen (the app then reads as
+/// hung — the stoplight button does NOT go through `performClose:`, so an
+/// override there never fires). Deny the close and end the modal instead;
+/// `present_about_modal` orders the window out after `runModal` returns.
+extern "C" fn window_should_close(_t: &Object, _c: Sel, _sender: *mut Object) -> bool {
+    unsafe { stop_modal(0) };
+    false
 }

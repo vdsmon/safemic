@@ -81,6 +81,9 @@ pub mod event_loop {
             previous_shortcut: Option<ShortcutConfig>,
         },
         CloseSettings,
+        SuspendHotkey {
+            suspended: bool,
+        },
         // Sidecar-only: trigger the snapshot timeline once the window has
         // settled / animations have run.
         Snapshot,

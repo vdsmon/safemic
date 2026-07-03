@@ -35,7 +35,6 @@ const NS_FONT_WEIGHT_REGULAR: f64 = 0.0;
 const NS_BOX_CUSTOM: u64 = 4;
 
 const WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(440.0, 180.0);
-const DEBOUNCE_SECS: f64 = 0.4;
 const ERROR_HOLD_SECS: f64 = 1.5;
 const WARNING_HOLD_SECS: f64 = 3.0;
 const RECORDING_PLACEHOLDER: &str = "Recording\u{2026}";
@@ -54,8 +53,6 @@ struct ActionContext {
     footer_label: id,
     escape_btn: id,
     settings_window: id,
-    /// Pending popup-duration commit timer (replaced on each keystroke).
-    debounce_timer: Cell<id>,
     /// Pending footer auto-clear timer.
     footer_hide_timer: Cell<id>,
     /// `true` between `recordShortcutAction:` firing and recorder callback.
@@ -130,7 +127,6 @@ impl SettingsWindow {
             footer_label: self.footer_label,
             escape_btn: self.escape_btn,
             settings_window: ns_window,
-            debounce_timer: Cell::new(nil),
             footer_hide_timer: Cell::new(nil),
             is_recording: Cell::new(false),
         })) as *mut c_void;
@@ -143,8 +139,6 @@ impl SettingsWindow {
         unsafe {
             let _: () = msg_send![self.launch_at_login_btn, setTarget: target];
             let _: () = msg_send![self.launch_at_login_btn, setAction: sel!(launchAtLoginToggled:)];
-            // NSTextField fires `controlTextDidChange:` on its delegate per keystroke.
-            let _: () = msg_send![self.popup_ms_field, setDelegate: target];
             let _: () = msg_send![self.popup_stepper, setTarget: target];
             let _: () = msg_send![self.popup_stepper, setAction: sel!(stepperChanged:)];
             let _: () = msg_send![self.escape_btn, setTarget: target];
@@ -193,15 +187,10 @@ impl SettingsWindow {
                 msg_send![self.launch_at_login_btn, setState: settings.launch_at_login as i64];
             let seconds = settings.popup_duration_ms as f64 / 1000.0;
             let _: () = msg_send![self.popup_stepper, setDoubleValue: seconds];
-            // Don't stomp the popup-ms field while the user is editing it —
-            // that would also cancel any in-flight IME composition.
-            let editor: id = msg_send![self.popup_ms_field, currentEditor];
-            if editor == nil {
-                set_string(
-                    self.popup_ms_field,
-                    &format_seconds(settings.popup_duration_ms),
-                );
-            }
+            set_string(
+                self.popup_ms_field,
+                &format_seconds(settings.popup_duration_ms),
+            );
             // Leave the chip alone while a recording is in flight: a debounced
             // popup-duration commit can land here via ApplySettings and would
             // otherwise replace the "Recording…" placeholder mid-capture.
@@ -336,73 +325,6 @@ extern "C" fn launch_at_login_toggled(this: &Object, _cmd: Sel, _sender: *mut Ob
     let ctx = unsafe { ctx_from(this) };
     let state: i64 = unsafe { msg_send![ctx.launch_at_login_btn, state] };
     persist(this, ctx, None, |s| s.launch_at_login = state == 1);
-}
-
-/// Per-keystroke; replaces any pending debounce timer with a fresh one
-/// targeting `popupDurationCommit:` after `DEBOUNCE_SECS`. The timer is
-/// retained while scheduled and released when fired/superseded so a stray
-/// callback can't land on a dangling pointer.
-extern "C" fn control_text_did_change(this: &Object, _cmd: Sel, _notification: *mut Object) {
-    let ctx = unsafe { ctx_from(this) };
-    unsafe {
-        let timer: id = msg_send![
-            class!(NSTimer),
-            scheduledTimerWithTimeInterval: DEBOUNCE_SECS
-            target: this selector: sel!(popupDurationCommit:)
-            userInfo: nil repeats: NO
-        ];
-        let _: () = msg_send![timer, retain];
-        let prev = ctx.debounce_timer.replace(timer);
-        if prev != nil {
-            let _: () = msg_send![prev, invalidate];
-            let _: () = msg_send![prev, release];
-        }
-    }
-}
-
-extern "C" fn popup_duration_commit(this: &Object, _cmd: Sel, _timer: *mut Object) {
-    let ctx = unsafe { ctx_from(this) };
-    // Release + clear the fired timer slot before doing any work; releases
-    // the +1 retain held while the timer was scheduled.
-    let prev = ctx.debounce_timer.replace(nil);
-    if prev != nil {
-        unsafe {
-            let _: () = msg_send![prev, release];
-        }
-    }
-    let trimmed = unsafe {
-        let raw: id = msg_send![ctx.popup_ms_field, stringValue];
-        let cstr: *const i8 = msg_send![raw, UTF8String];
-        if cstr.is_null() {
-            String::new()
-        } else {
-            std::ffi::CStr::from_ptr(cstr)
-                .to_string_lossy()
-                .trim()
-                .to_string()
-        }
-    };
-    // parse::<f64> accepts "inf"/"nan"/"1e999"; the attached NSNumberFormatter
-    // only validates on end-editing, so the debounced path re-checks. Range
-    // matches the formatter/stepper bounds.
-    let parsed = trimmed
-        .parse::<f64>()
-        .ok()
-        .filter(|s| s.is_finite() && (0.0..=MAX_POPUP_SECONDS).contains(s));
-    match parsed {
-        None => {
-            // Empty / unparseable / out of range: revert to persisted value, no save.
-            let current = ctx.settings.read().unwrap().popup_duration_ms;
-            unsafe { set_string(ctx.popup_ms_field, &format_seconds(current)) };
-        }
-        Some(s) => {
-            let ms = quantize_seconds_to_ms(s);
-            unsafe {
-                let _: () = msg_send![ctx.popup_stepper, setDoubleValue: ms as f64 / 1000.0];
-            }
-            persist(this, ctx, None, |store| store.popup_duration_ms = ms);
-        }
-    }
 }
 
 extern "C" fn stepper_changed(this: &Object, _cmd: Sel, _sender: *mut Object) {
@@ -601,14 +523,6 @@ fn actions_class() -> &'static Class {
                 launch_at_login_toggled as extern "C" fn(&Object, Sel, *mut Object),
             );
             decl.add_method(
-                sel!(controlTextDidChange:),
-                control_text_did_change as extern "C" fn(&Object, Sel, *mut Object),
-            );
-            decl.add_method(
-                sel!(popupDurationCommit:),
-                popup_duration_commit as extern "C" fn(&Object, Sel, *mut Object),
-            );
-            decl.add_method(
                 sel!(stepperChanged:),
                 stepper_changed as extern "C" fn(&Object, Sel, *mut Object),
             );
@@ -660,6 +574,12 @@ extern "C" fn record_shortcut_action(this: &Object, _cmd: Sel, _sender: *mut Obj
     clear_footer(ctx);
     enter_recording_visual(ctx);
     ctx.is_recording.set(true);
+    // The registered hotkey would consume its own combo before the recorder
+    // sees the keyDown, toggling mute instead of re-capturing it. Suspend it
+    // for the duration of the recording.
+    let _ = ctx
+        .proxy
+        .send_event(Message::SuspendHotkey { suspended: true });
     // Disable the invisible Escape button while recording so Escape reaches
     // the recorder view's cancelOperation: instead of closing the window.
     unsafe {
@@ -692,6 +612,11 @@ extern "C" fn record_shortcut_action(this: &Object, _cmd: Sel, _sender: *mut Obj
 fn handle_capture(this: &Object, result: shortcut_recorder::CaptureResult) {
     let ctx = unsafe { ctx_from(this) };
     ctx.is_recording.set(false);
+    // Queued before any ApplySettings from persist below, so the event loop
+    // re-registers the old combo first, then reload swaps in the new one.
+    let _ = ctx
+        .proxy
+        .send_event(Message::SuspendHotkey { suspended: false });
     exit_recording_visual(ctx);
     unsafe {
         let _: () = msg_send![ctx.escape_btn, setEnabled: YES];
@@ -1180,33 +1105,19 @@ unsafe fn separator_color() -> id {
     msg_send![class!(NSColor), separatorColor]
 }
 
+/// Read-only value display for the popup duration; the stepper is the sole
+/// edit affordance (free-text editing raced auto-apply refreshes and was
+/// dropped deliberately).
 unsafe fn make_duration_field() -> id {
     let field: id = msg_send![class!(NSTextField), alloc];
     let field: id = msg_send![field, init];
     let _: () = msg_send![field, setBezeled: YES];
-    let _: () = msg_send![field, setEditable: YES];
-    let _: () = msg_send![field, setSelectable: YES];
+    let _: () = msg_send![field, setEditable: NO];
+    let _: () = msg_send![field, setSelectable: NO];
     let _: () = msg_send![field, setDrawsBackground: YES];
     let _: () = msg_send![field, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
     let font: id = msg_send![class!(NSFont), monospacedDigitSystemFontOfSize: 13.0_f64 weight: NS_FONT_WEIGHT_REGULAR];
     let _: () = msg_send![field, setFont: font];
-    // NSNumberFormatter rejects non-numeric input on end-editing; the
-    // debounced commit path still validates per-keystroke text.
-    let formatter: id = msg_send![class!(NSNumberFormatter), alloc];
-    let formatter: id = msg_send![formatter, init];
-    let _: () = msg_send![formatter, setNumberStyle: 1u64]; // NSNumberFormatterDecimalStyle
-    let _: () = msg_send![formatter, setMaximumFractionDigits: 1u64];
-    let zero: id = msg_send![class!(NSNumber), numberWithDouble: 0.0_f64];
-    let max: id = msg_send![class!(NSNumber), numberWithDouble: MAX_POPUP_SECONDS];
-    let _: () = msg_send![formatter, setMinimum: zero];
-    let _: () = msg_send![formatter, setMaximum: max];
-    let _: () = msg_send![field, setFormatter: formatter];
-    let _: () = msg_send![formatter, release];
-    // Placeholder mirrors format_seconds(default 1000ms); the field edits
-    // seconds, not milliseconds.
-    let placeholder = NSString::alloc(nil).init_str("1.0");
-    let _: () = msg_send![field, setPlaceholderString: placeholder];
-    let _: () = msg_send![placeholder, release];
     let tt = NSString::alloc(nil).init_str("Seconds. 0 = never show.");
     let _: () = msg_send![field, setToolTip: tt];
     let _: () = msg_send![tt, release];

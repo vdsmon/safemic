@@ -136,6 +136,14 @@ impl UI {
         self.shortcuts.mic_hotkey.id()
     }
 
+    pub fn set_hotkey_suspended(&mut self, suspended: bool) {
+        if suspended {
+            self.shortcuts.suspend();
+        } else if let Err(e) = self.shortcuts.resume() {
+            log::error!("Failed to re-register hotkey after recording: {}", e);
+        }
+    }
+
     pub fn detect(&mut self) -> Result<&mut Self> {
         self.popup
             .detect_cursor_monitor()

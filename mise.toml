@@ -17,7 +17,10 @@ run = [
 description = "Compile, run, watch for changes (live-reload dev loop)"
 alias = ["watch", "run"]
 env = { RUST_LOG = "info,safemic=trace" }
-run = "watchexec --poll 500ms -e rs,toml -- cargo run"
+# --no-vcs-ignore: git worktrees live under .claude/worktrees, which the main
+# repo's .gitignore covers, so watchexec would otherwise ignore every file and
+# never reload. Explicit -w paths keep target/ out of the watch set.
+run = "watchexec --poll 500ms --no-vcs-ignore -w src -w Cargo.toml -w Cargo.lock -e rs,toml -- cargo run"
 
 [tasks.check]
 description = "Clippy + fmt check (CI gate)"
