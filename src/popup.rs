@@ -15,7 +15,7 @@ use tao::{
     dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
     monitor::MonitorHandle,
     platform::macos::{WindowBuilderExtMacOS, WindowExtMacOS},
-    window::{Theme, Window, WindowBuilder},
+    window::{Window, WindowBuilder},
 };
 
 const MUTED_TITLE: &str = "Muted";
@@ -176,10 +176,6 @@ impl Popup {
             crate::popup_content::BEZEL_SIZE,
             crate::popup_content::BEZEL_SIZE,
         )
-    }
-
-    pub fn get_theme(&self) -> Theme {
-        self.window.theme()
     }
 
     pub fn update(

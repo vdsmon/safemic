@@ -1,11 +1,14 @@
 use crate::config::AppVars;
 use crate::event_loop::{create, EventIds, EventLoopMessage, EventLoopProxyMessage};
 use crate::popup::Popup;
-use crate::settings::Settings;
+use crate::settings::{Settings, ThemePreference};
 use crate::settings_window::SettingsWindow;
 use crate::shortcuts::Shortcuts;
 use crate::tray::Tray;
+use crate::utils::system_theme;
 use anyhow::{Context, Result};
+use cocoa::base::{id, nil};
+use cocoa::foundation::NSString;
 use log::trace;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, RwLock};
@@ -31,12 +34,12 @@ impl UI {
         settings: &Settings,
     ) -> Result<(Self, EventLoopMessage, EventIds)> {
         let event_loop = create();
+        apply_theme(settings.theme);
         let popup = Popup::new(&event_loop, mic_muted, settings.popup_duration_ms)
             .context("Failed to setup popup window")?;
         let settings_window =
             SettingsWindow::new(&event_loop).context("Failed to setup settings window")?;
-        let theme = popup.get_theme();
-        let tray = Tray::new(mic_muted, theme, app_vars, &settings.mic_shortcut)
+        let tray = Tray::new(mic_muted, system_theme(), app_vars, &settings.mic_shortcut)
             .context("Failed to create system tray")?;
         let shortcuts = Shortcuts::new(settings).context("Failed to setup shortcuts")?;
 
@@ -90,7 +93,7 @@ impl UI {
         trace!("Updating UI mic state {}", muted);
         self.mic_muted = muted;
         self.tray
-            .update(muted, self.popup.get_theme())
+            .update(muted, system_theme())
             .context("Failed to update UI tray")?;
         self.popup
             .update(muted, active_device_name)
@@ -119,8 +122,10 @@ impl UI {
             .update_accelerators(&settings.mic_shortcut)
             .context("Failed to update tray accelerators")?;
 
-        // Apply popup duration live (hides any currently-visible pill when set to 0)
+        // Apply popup duration live (hides any currently-visible bezel when set to 0)
         self.popup.set_popup_duration_ms(settings.popup_duration_ms);
+
+        apply_theme(settings.theme);
 
         if let Err(e) = crate::launch_at_login::set(settings.launch_at_login) {
             log::error!("Failed to apply launch_at_login setting: {}", e);
@@ -149,5 +154,29 @@ impl UI {
             .detect_cursor_monitor()
             .context("Failed to update UI popup placement")?;
         Ok(self)
+    }
+}
+
+/// NSApp-level appearance override; `System` clears it so every window
+/// follows the OS setting. Idempotent, main-thread only (called from UI
+/// construction and the ApplySettings handler).
+fn apply_theme(theme: ThemePreference) {
+    let name = match theme {
+        ThemePreference::System => None,
+        ThemePreference::Light => Some("NSAppearanceNameAqua"),
+        ThemePreference::Dark => Some("NSAppearanceNameDarkAqua"),
+    };
+    unsafe {
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
+        let appearance: id = match name {
+            None => nil,
+            Some(name) => {
+                let ns_name = NSString::alloc(nil).init_str(name);
+                let appearance: id = msg_send![class!(NSAppearance), appearanceNamed: ns_name];
+                let _: () = msg_send![ns_name, release];
+                appearance
+            }
+        };
+        let _: () = msg_send![app, setAppearance: appearance];
     }
 }

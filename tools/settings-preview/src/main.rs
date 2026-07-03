@@ -43,11 +43,20 @@ pub mod settings {
         }
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum ThemePreference {
+        #[default]
+        System,
+        Light,
+        Dark,
+    }
+
     #[derive(Debug, Clone)]
     pub struct Settings {
         pub mic_shortcut: ShortcutConfig,
         pub launch_at_login: bool,
         pub popup_duration_ms: u64,
+        pub theme: ThemePreference,
     }
 
     impl Default for Settings {
@@ -56,6 +65,7 @@ pub mod settings {
                 mic_shortcut: ShortcutConfig::default(),
                 launch_at_login: false,
                 popup_duration_ms: 1000,
+                theme: ThemePreference::default(),
             }
         }
     }
