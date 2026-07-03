@@ -38,7 +38,7 @@ pub mod settings {
         fn default() -> Self {
             Self {
                 modifiers: vec!["shift".to_string(), "meta".to_string()],
-                key: "A".to_string(),
+                key: "M".to_string(),
             }
         }
     }

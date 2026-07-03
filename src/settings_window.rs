@@ -807,9 +807,25 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         add(card_cv, sep);
     }
 
-    // row 1: Mute shortcut
-    place_row_label(card_cv, "Mute shortcut", row_bottom(0.0));
-    let chip_y = vcenter_in_row(row_bottom(0.0), CHIP_H);
+    // row 1: Appearance — System / Light / Dark popup button
+    place_row_label(card_cv, "Appearance", row_bottom(0.0));
+    let theme_popup = make_theme_popup();
+    let _: () = msg_send![theme_popup, sizeToFit];
+    let pf: NSRect = msg_send![theme_popup, frame];
+    add(
+        card_cv,
+        place(
+            theme_popup,
+            CARD_W - CONTROL_INSET - pf.size.width,
+            vcenter_in_row(row_bottom(0.0), pf.size.height),
+            pf.size.width,
+            pf.size.height,
+        ),
+    );
+
+    // row 2: Mute shortcut
+    place_row_label(card_cv, "Mute shortcut", row_bottom(1.0));
+    let chip_y = vcenter_in_row(row_bottom(1.0), CHIP_H);
     let chip_x = CARD_W - CONTROL_INSET - CHIP_MIN_W;
     let shortcut_label = make_chip_label();
     let shortcut_chip = make_chip_box(chip_x, chip_y, CHIP_MIN_W, CHIP_H);
@@ -822,8 +838,8 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(record_btn, chip_x, chip_y, CHIP_MIN_W, CHIP_H),
     );
 
-    // row 2: Launch at login
-    place_row_label(card_cv, "Launch at login", row_bottom(1.0));
+    // row 3: Launch at login
+    place_row_label(card_cv, "Launch at login", row_bottom(2.0));
     // NSSwitch draws at its natural size centered in whatever frame it gets,
     // so a hardcoded frame width misaligns its visual right edge. Size to
     // fit and pin the fitted frame's right edge to the control column.
@@ -835,14 +851,14 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             launch_at_login_btn,
             CARD_W - CONTROL_INSET - sw.size.width,
-            vcenter_in_row(row_bottom(1.0), sw.size.height),
+            vcenter_in_row(row_bottom(2.0), sw.size.height),
             sw.size.width,
             sw.size.height,
         ),
     );
 
-    // row 3: Popup duration — [field][stepper] s
-    place_row_label(card_cv, "Popup duration", row_bottom(2.0));
+    // row 4: Popup duration — [field][stepper] s
+    place_row_label(card_cv, "Popup duration", row_bottom(3.0));
     let unit = make_unit_label("s");
     let _: () = msg_send![unit, sizeToFit];
     let unit_frame: NSRect = msg_send![unit, frame];
@@ -852,7 +868,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         card_cv,
         unit,
         unit_x,
-        vcenter_in_row(row_bottom(2.0), unit_frame.size.height),
+        vcenter_in_row(row_bottom(3.0), unit_frame.size.height),
     );
     let popup_stepper = make_stepper();
     let stepper_x = unit_x - 6.0 - STEPPER_W;
@@ -861,7 +877,7 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             popup_stepper,
             stepper_x,
-            vcenter_in_row(row_bottom(2.0), STEPPER_H),
+            vcenter_in_row(row_bottom(3.0), STEPPER_H),
             STEPPER_W,
             STEPPER_H,
         ),
@@ -872,25 +888,9 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         place(
             popup_ms_field,
             stepper_x - 4.0 - FIELD_W,
-            vcenter_in_row(row_bottom(2.0), FIELD_H),
+            vcenter_in_row(row_bottom(3.0), FIELD_H),
             FIELD_W,
             FIELD_H,
-        ),
-    );
-
-    // row 4: Appearance — System / Light / Dark popup button
-    place_row_label(card_cv, "Appearance", row_bottom(3.0));
-    let theme_popup = make_theme_popup();
-    let _: () = msg_send![theme_popup, sizeToFit];
-    let pf: NSRect = msg_send![theme_popup, frame];
-    add(
-        card_cv,
-        place(
-            theme_popup,
-            CARD_W - CONTROL_INSET - pf.size.width,
-            vcenter_in_row(row_bottom(3.0), pf.size.height),
-            pf.size.width,
-            pf.size.height,
         ),
     );
 

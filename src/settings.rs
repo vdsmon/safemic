@@ -13,7 +13,7 @@ impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
             modifiers: vec!["shift".to_string(), "meta".to_string()],
-            key: "A".to_string(),
+            key: "M".to_string(),
         }
     }
 }
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn test_default_shortcut() {
         let sc = ShortcutConfig::default();
-        assert_eq!(sc.key, "A");
+        assert_eq!(sc.key, "M");
         assert!(sc.modifiers.contains(&"shift".to_string()));
         assert!(sc.modifiers.contains(&"meta".to_string()));
     }
@@ -111,7 +111,7 @@ mod tests {
 
         let json = serde_json::to_string(&s).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.mic_shortcut.key, "A");
+        assert_eq!(loaded.mic_shortcut.key, "M");
     }
 
     #[test]
