@@ -4,8 +4,8 @@ use crate::utils::get_cursor_pos;
 use anyhow::{Context, Result};
 use async_std::task;
 use cocoa::{
-    appkit::{NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility},
-    base::{id, YES},
+    appkit::{NSView, NSWindow},
+    base::{id, NO},
 };
 use log::trace;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,19 +46,11 @@ fn monitor_contains_physical_position(
 fn setup_window(window: id) {
     unsafe {
         window.setHasShadow_(true);
-        // Rounded edges hack: https://stackoverflow.com/a/37418915
-        let mask = window.styleMask();
-        let _: () = msg_send![
-            window,
-            setStyleMask: mask
-                | NSWindowStyleMask::NSTitledWindowMask
-                | NSWindowStyleMask::NSFullSizeContentViewWindowMask
-        ];
-        let _: () = msg_send![
-            window,
-            setTitleVisibility: NSWindowTitleVisibility::NSWindowTitleHidden
-        ];
-        let _: () = msg_send![window, setTitlebarAppearsTransparent: YES];
+        // Transparent window; the rounded capsule shape comes from the
+        // vibrancy content view's masked layer.
+        let clear: id = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![window, setOpaque: NO];
+        let _: () = msg_send![window, setBackgroundColor: clear];
     };
 }
 
@@ -116,7 +108,7 @@ impl Popup {
         window.set_ignore_cursor_events(true)?;
 
         trace!("Window scale factor {}", scale);
-        let content = PopupContent::new(mic_muted, size, window.theme())?;
+        let content = PopupContent::new(mic_muted, size)?;
         unsafe {
             let ns_view = window.ns_view() as id;
             ns_view.addSubview_(content.view);
@@ -194,8 +186,7 @@ impl Popup {
     ) -> Result<&mut Self> {
         self.window.set_title(get_mute_title_text(mic_muted));
         self.update_placement()?;
-        self.content
-            .update(mic_muted, self.get_theme(), active_device_name)?;
+        self.content.update(mic_muted, active_device_name)?;
         let mic_changed = self.last_mic_muted != Some(mic_muted);
         self.last_mic_muted = Some(mic_muted);
         trace!(

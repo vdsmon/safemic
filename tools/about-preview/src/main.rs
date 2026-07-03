@@ -39,6 +39,25 @@ fn main() -> Result<()> {
         let _: bool = msg_send![app, finishLaunching];
 
         let aw = about::build_about_window();
+
+        // The window follows the system appearance; captures must be
+        // deterministic, so the sidecar pins one explicitly.
+        let appearance = std::env::var("SAFEMIC_PREVIEW_APPEARANCE").unwrap_or_default();
+        let appearance_name = match appearance.as_str() {
+            "light" => "NSAppearanceNameAqua",
+            "" | "dark" => "NSAppearanceNameDarkAqua",
+            other => {
+                log::error!("unknown SAFEMIC_PREVIEW_APPEARANCE: {other}");
+                std::process::exit(1);
+            }
+        };
+        let ns_name = NSString::alloc(nil).init_str(appearance_name);
+        let ns_appearance: id = msg_send![class!(NSAppearance), appearanceNamed: ns_name];
+        let _: () = msg_send![ns_name, release];
+        if ns_appearance != nil {
+            let _: () = msg_send![aw.window, setAppearance: ns_appearance];
+        }
+
         let _: () = msg_send![aw.window, makeKeyAndOrderFront: nil];
         let _: () = msg_send![app, activateIgnoringOtherApps: YES];
         // Apply the target frame and full opacity directly (no animator —
