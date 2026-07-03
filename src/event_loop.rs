@@ -26,6 +26,16 @@ pub extern "C" fn handle_sigusr1(_: libc::c_int) {
     OPEN_SETTINGS_REQUESTED.store(true, Ordering::SeqCst);
 }
 
+// dev signal hook: SIGUSR2 toggles mute, same rationale as SIGUSR1.
+#[cfg(debug_assertions)]
+pub static TOGGLE_MUTE_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(debug_assertions)]
+pub extern "C" fn handle_sigusr2(_: libc::c_int) {
+    TOGGLE_MUTE_REQUESTED.store(true, Ordering::SeqCst);
+}
+
 #[derive(Debug)]
 pub enum Message {
     HidePopup,
@@ -194,6 +204,12 @@ pub fn start(
             trace!("SIGUSR1 received, opening Settings window");
             let s = settings.read().unwrap();
             ui.read().unwrap().open_settings_window(&s);
+        }
+
+        #[cfg(debug_assertions)]
+        if TOGGLE_MUTE_REQUESTED.swap(false, Ordering::SeqCst) {
+            trace!("SIGUSR2 received, toggling mute");
+            update_mic(ui.clone(), controller.clone(), true);
         }
 
         if let Ok(event) = MenuEvent::receiver().try_recv() {

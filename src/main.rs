@@ -67,12 +67,16 @@ fn main() {
             handle_signal as *const () as libc::sighandler_t,
         );
     }
-    // Dev-only QA hook, matching the cfg on event_loop::handle_sigusr1.
+    // Dev-only QA hooks, matching the cfg on the event_loop handlers.
     #[cfg(debug_assertions)]
     unsafe {
         libc::signal(
             libc::SIGUSR1,
             event_loop::handle_sigusr1 as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGUSR2,
+            event_loop::handle_sigusr2 as *const () as libc::sighandler_t,
         );
     }
     let shutdown_controller = controller.clone();
