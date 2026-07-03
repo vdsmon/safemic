@@ -779,7 +779,6 @@ const CONTROL_INSET: f64 = 12.0;
 const CHIP_MIN_W: f64 = 76.0;
 const CHIP_H: f64 = 24.0;
 const FIELD_W: f64 = 56.0;
-const FIELD_H: f64 = 22.0;
 const STEPPER_W: f64 = 19.0;
 const STEPPER_H: f64 = 27.0;
 const FOOTER_H: f64 = 16.0;
@@ -857,21 +856,11 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
         ),
     );
 
-    // row 4: Popup duration — [field][stepper] s
+    // row 4: Popup duration — [value] s [stepper], stepper pinned to the
+    // control column's right edge like the switch and popup above it.
     place_row_label(card_cv, "Popup duration", row_bottom(3.0));
-    let unit = make_unit_label("s");
-    let _: () = msg_send![unit, sizeToFit];
-    let unit_frame: NSRect = msg_send![unit, frame];
-    let unit_w = unit_frame.size.width;
-    let unit_x = CARD_W - CONTROL_INSET - unit_w;
-    place_intrinsic(
-        card_cv,
-        unit,
-        unit_x,
-        vcenter_in_row(row_bottom(3.0), unit_frame.size.height),
-    );
     let popup_stepper = make_stepper();
-    let stepper_x = unit_x - 6.0 - STEPPER_W;
+    let stepper_x = CARD_W - CONTROL_INSET - STEPPER_W;
     add(
         card_cv,
         place(
@@ -882,15 +871,25 @@ unsafe fn build_content_view(window: &Window) -> BuiltViews {
             STEPPER_H,
         ),
     );
-    let popup_ms_field = make_duration_field();
+    let unit = make_unit_label("s");
+    let _: () = msg_send![unit, sizeToFit];
+    let unit_frame: NSRect = msg_send![unit, frame];
+    let unit_x = stepper_x - 8.0 - unit_frame.size.width;
+    place_intrinsic(
+        card_cv,
+        unit,
+        unit_x,
+        vcenter_in_row(row_bottom(3.0), unit_frame.size.height),
+    );
+    let popup_ms_field = make_duration_label();
     add(
         card_cv,
         place(
             popup_ms_field,
-            stepper_x - 4.0 - FIELD_W,
-            vcenter_in_row(row_bottom(3.0), FIELD_H),
+            unit_x - 3.0 - FIELD_W,
+            vcenter_in_row(row_bottom(3.0), unit_frame.size.height),
             FIELD_W,
-            FIELD_H,
+            unit_frame.size.height,
         ),
     );
 
@@ -1191,21 +1190,16 @@ unsafe fn separator_color() -> id {
 
 /// Read-only value display for the popup duration; the stepper is the sole
 /// edit affordance (free-text editing raced auto-apply refreshes and was
-/// dropped deliberately).
-unsafe fn make_duration_field() -> id {
-    let field: id = msg_send![class!(NSTextField), alloc];
-    let field: id = msg_send![field, init];
-    let _: () = msg_send![field, setBezeled: YES];
-    let _: () = msg_send![field, setEditable: NO];
-    let _: () = msg_send![field, setSelectable: NO];
-    let _: () = msg_send![field, setDrawsBackground: YES];
-    let _: () = msg_send![field, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
+/// dropped deliberately). Drawn as a plain label, not a bezeled field, so
+/// it doesn't invite typing.
+unsafe fn make_duration_label() -> id {
     let font: id = msg_send![class!(NSFont), monospacedDigitSystemFontOfSize: 13.0_f64 weight: NS_FONT_WEIGHT_REGULAR];
-    let _: () = msg_send![field, setFont: font];
+    let label = make_plain_label(font, label_color());
+    let _: () = msg_send![label, setAlignment: NS_TEXT_ALIGNMENT_RIGHT];
     let tt = NSString::alloc(nil).init_str("Seconds. 0 = never show.");
-    let _: () = msg_send![field, setToolTip: tt];
+    let _: () = msg_send![label, setToolTip: tt];
     let _: () = msg_send![tt, release];
-    field
+    label
 }
 
 unsafe fn set_frame(view: id, x: f64, y: f64, w: f64, h: f64) {
